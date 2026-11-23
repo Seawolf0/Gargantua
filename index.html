@@ -1,0 +1,2996 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Gargantua — real-time Kerr black hole</title>
+<style>
+  :root {
+    --ink: rgba(255, 255, 255, 0.92);
+    --ink-dim: rgba(255, 255, 255, 0.52);
+    --ink-faint: rgba(255, 255, 255, 0.28);
+    --hair: rgba(255, 255, 255, 0.10);
+    --glass: rgba(16, 16, 20, 0.46);
+    --accent: #ffb86b;
+    --ok: #7fe0a3;
+    --bad: #ff7b6b;
+    font: 12px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; color: var(--ink); overflow: hidden; }
+  body { -webkit-font-smoothing: antialiased; user-select: none; -webkit-user-select: none; }
+  canvas#view { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; touch-action: none; cursor: grab; }
+  canvas#view.dragging { cursor: grabbing; }
+
+  .glass {
+    background: var(--glass);
+    -webkit-backdrop-filter: blur(28px) saturate(1.5);
+    backdrop-filter: blur(28px) saturate(1.5);
+    border: 1px solid var(--hair);
+    border-radius: 16px;
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+  [hidden] { display: none !important; }
+  .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+  /* status pills */
+  #hud { position: fixed; top: 14px; left: 14px; display: flex; gap: 8px; align-items: center; pointer-events: none; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: 11px;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-dim);
+    background: rgba(16, 16, 20, 0.42); border: 1px solid var(--hair);
+    -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+  }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-faint); }
+  .pill.on { color: var(--ink); }
+  .pill.on::before { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .pill.warn { text-transform: none; letter-spacing: 0.01em; font-weight: 500; color: var(--ink); }
+  .pill.warn::before { background: var(--bad); }
+
+  #hint {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); white-space: nowrap;
+    color: var(--ink-dim); font-size: 11px; letter-spacing: 0.02em; pointer-events: none;
+    transition: opacity 1.2s ease; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
+  }
+  #hint.faded { opacity: 0; }
+  kbd {
+    font: inherit; font-weight: 600; color: var(--ink); padding: 1px 5px; margin: 0 2px; border-radius: 5px;
+    background: rgba(255, 255, 255, 0.09); border: 1px solid var(--hair);
+  }
+
+  /* control panel */
+  #panel { position: fixed; top: 14px; right: 14px; width: 272px; max-height: calc(100vh - 28px); overflow-y: auto; padding: 14px 16px 12px; }
+  #panel h1 { margin: 0 0 2px; font-size: 13px; font-weight: 600; letter-spacing: 0.01em; }
+  #panel .sub { margin: 0 0 12px; color: var(--ink-dim); font-size: 11px; }
+  .row { display: grid; grid-template-columns: 1fr auto; align-items: baseline; row-gap: 5px; margin: 10px 0; }
+  .row label { color: var(--ink-dim); }
+  .row output { color: var(--ink); }
+  .row input[type=range] { grid-column: 1 / -1; }
+  input[type=range] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 14px; margin: 0; background: transparent; cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-runnable-track { height: 2px; border-radius: 1px; background: rgba(255, 255, 255, 0.22); }
+  input[type=range]::-moz-range-track { height: 2px; border-radius: 1px; background: rgba(255, 255, 255, 0.22); }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 12px; height: 12px; margin-top: -5px; border-radius: 50%; border: 0;
+    background: #fff; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+  }
+  input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; border: 0; background: #fff; }
+  input[type=range]:disabled { opacity: 0.35; cursor: default; }
+  input[type=range]:focus-visible, .seg button:focus-visible, select:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
+
+  .seg { grid-column: 1 / -1; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 2px; border-radius: 9px; background: rgba(255, 255, 255, 0.07); }
+  .seg button {
+    font: inherit; color: var(--ink-dim); background: transparent; border: 0; border-radius: 7px; padding: 5px 0; cursor: pointer;
+  }
+  .seg button[aria-pressed=true] { color: #000; background: rgba(255, 255, 255, 0.88); font-weight: 600; }
+  select {
+    font: inherit; color: var(--ink); background: rgba(255, 255, 255, 0.07); border: 1px solid var(--hair); border-radius: 7px;
+    padding: 3px 6px; cursor: pointer;
+  }
+  .rule { height: 1px; margin: 12px -16px; background: var(--hair); }
+  #readout { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; color: var(--ink-dim); font-size: 11px; }
+  #readout b { font-weight: 500; color: var(--ink); text-align: right; }
+
+  /* diagnostics overlay */
+  #debug { position: fixed; left: 14px; top: 48px; width: min(560px, calc(100vw - 28px)); max-height: calc(100vh - 80px); overflow: auto; padding: 14px 16px; }
+  #debug h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim); }
+  #debug table { width: 100%; border-collapse: collapse; }
+  #debug td, #debug th { padding: 3px 0 3px 14px; text-align: right; font-weight: 400; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+  #debug th { color: var(--ink-faint); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+  #debug td:first-child, #debug th:first-child { text-align: left; color: var(--ink-dim); padding-left: 0; }
+  .pass { color: var(--ok); font-weight: 600; }
+  .fail { color: var(--bad); font-weight: 600; }
+  #debug .live { display: grid; grid-template-columns: 1fr 132px; gap: 14px; margin-top: 12px; align-items: start; }
+  #debug .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; color: var(--ink-dim); font-size: 11px; }
+  #debug .kv b { font-weight: 500; color: var(--ink); text-align: right; }
+  #debug svg { width: 132px; height: 132px; display: block; }
+  #debug figcaption { color: var(--ink-faint); font-size: 10px; text-align: center; margin-top: 2px; }
+  #debug figure { margin: 0; }
+
+  #fatal { position: fixed; inset: 0; display: grid; place-items: center; text-align: center; padding: 40px; color: var(--ink-dim); font-size: 14px; }
+</style>
+</head>
+<body>
+<canvas id="view" aria-label="Real-time rendering of a spinning black hole with an accretion disk"></canvas>
+
+<div id="hud">
+  <span id="hdrPill" class="pill">SDR</span>
+  <span id="notice" class="pill warn" hidden></span>
+</div>
+
+<div id="hint">Drag to orbit · scroll to zoom · <kbd>1</kbd>–<kbd>4</kbd> views · <kbd>H</kbd> controls · <kbd>D</kbd> diagnostics · <kbd>M</kbd> mode · <kbd>Space</kbd> pause</div>
+
+<aside id="panel" class="glass" hidden>
+  <h1>Gargantua</h1>
+  <p class="sub">Kerr black hole · geodesic ray tracing</p>
+
+  <div class="row"><label for="spin">Spin a / M</label><output id="spinOut" class="num"></output>
+    <input id="spin" type="range" min="0" max="0.998" step="0.001"></div>
+  <div class="row"><label for="inc">Inclination</label><output id="incOut" class="num"></output>
+    <input id="inc" type="range" min="0.5" max="179.5" step="0.1"></div>
+  <div class="row"><label for="temp">Disk temperature (peak)</label><output id="tempOut" class="num"></output>
+    <input id="temp" type="range" min="2000" max="30000" step="100"></div>
+  <div class="row"><label>Rendering</label><span></span>
+    <div class="seg" id="mode" role="group" aria-label="Render mode">
+      <button type="button" data-mode="cinematic">Cinematic</button>
+      <button type="button" data-mode="physical">Physical</button>
+    </div></div>
+
+  <div class="rule"></div>
+
+  <div class="row"><label for="exposure">Exposure</label><output id="exposureOut" class="num"></output>
+    <input id="exposure" type="range" min="-4" max="4" step="0.05"></div>
+  <div class="row"><label for="bloom">Bloom</label><output id="bloomOut" class="num"></output>
+    <input id="bloom" type="range" min="0" max="0.4" step="0.005"></div>
+  <div class="row"><label for="peak">HDR peak</label><output id="peakOut" class="num"></output>
+    <input id="peak" type="range" min="2" max="12" step="0.5"></div>
+  <div class="row"><label for="quality">Quality</label>
+    <select id="quality">
+      <option value="low">Low</option><option value="medium">Medium</option>
+      <option value="high">High</option><option value="ultra">Ultra</option>
+    </select></div>
+
+  <div class="rule"></div>
+
+  <div id="readout" class="num">
+    <span>Frame rate</span><b id="roFps">–</b>
+    <span>Resolution</span><b id="roRes">–</b>
+    <span>Geodesics</span><b id="roState">–</b>
+    <span>Backend</span><b id="roBackend">–</b>
+  </div>
+</aside>
+
+<section id="debug" class="glass num" hidden>
+  <h2>Accuracy self-check</h2>
+  <table>
+    <thead><tr><th>Check</th><th>Expected</th><th>Measured</th><th>Result</th></tr></thead>
+    <tbody id="checks"><tr><td colspan="4">Integrating test geodesics…</td></tr></tbody>
+  </table>
+  <div class="live">
+    <div class="kv" id="liveKV"></div>
+    <figure>
+      <svg id="shadowPlot" viewBox="-9 -9 18 18" aria-label="Analytic shadow outline for the current spin and inclination"></svg>
+      <figcaption>shadow rim (analytic), units of M</figcaption>
+    </figure>
+  </div>
+</section>
+
+<script>
+"use strict";
+/*
+  GARGANTUA: real-time Kerr black hole
+  ────────────────────────────────────────────────────────────────────────────
+  A single-file renderer for a spinning (Kerr) black hole with a thin accretion
+  disk and a lensed sky, in the manner of the Double Negative / Kip Thorne
+  renderings for Interstellar [J15].
+
+  Contents
+    1. Kerr physics (CPU, double precision): metric, geodesics, ISCO, flux, tetrad
+    2. Lookup tables: blackbody colours (Planck × CIE 1931), Page–Thorne flux, noise
+    3. Shaders (WGSL + GLSL ES 3.00 port)
+    4. WebGPU renderer
+    5. WebGL2 fallback renderer
+    6. Application: camera, geodesic-cache scheduling, UI, self-check
+
+  Units: G = c = M = 1.  Lengths are in gravitational radii GM/c².
+
+  Keys: drag = orbit, scroll = distance, 1–4 = views, H = controls, D = accuracy
+  self-check, M = Physical/Cinematic, Space = pause.
+  URL options: ?backend=webgl2 (force the fallback), ?quality=low|medium|high|ultra,
+  ?hdr=0 (force SDR), ?auto=0 (disable the frame-rate governor), ?sky=<cubemap size>.
+*/
+
+/* ════════════════════════════════════════════════════════════════════════════
+   1. KERR PHYSICS (CPU, double precision)
+   Geometric units G = c = M = 1.  Spin axis = +z.  Spin parameter a ∈ [0, 1).
+
+   References
+     [B72]   Bardeen, Press & Teukolsky 1972, ApJ 178, 347
+             "Rotating black holes: locally nonrotating frames, energy
+             extraction, and scalar synchrotron radiation"
+     [NT73]  Novikov & Thorne 1973, "Astrophysics of black holes", in
+             Black Holes (Les Astres Occlus), eds. DeWitt & DeWitt
+     [PT74]  Page & Thorne 1974, ApJ 191, 499 (time-averaged disk flux)
+     [J15]   James, von Tunzelmann, Franklin & Thorne 2015, CQG 32, 065001
+             "Gravitational lensing by spinning black holes in astrophysics,
+             and in the movie Interstellar"
+
+   Everything here is mirrored 1:1 by the GPU shaders; the CPU copy drives the
+   camera tetrad, the lookup tables and the numerical self-check overlay.
+   ════════════════════════════════════════════════════════════════════════════ */
+const Kerr = (() => {
+  /** Outer event horizon r+ = 1 + sqrt(1 − a²). */
+  const horizon = (a) => 1 + Math.sqrt(Math.max(0, 1 - a * a));
+
+  /** Innermost stable circular orbit [B72 eq. 2.21]. sign=+1 prograde, −1 retrograde. */
+  function isco(a, sign = +1) {
+    const z1 = 1 + Math.cbrt(1 - a * a) * (Math.cbrt(1 + a) + Math.cbrt(1 - a));
+    const z2 = Math.sqrt(3 * a * a + z1 * z1);
+    return 3 + z2 - sign * Math.sqrt((3 - z1) * (3 + z1 + 2 * z2));
+  }
+
+  /** Equatorial circular photon orbit [B72 eq. 2.18]. */
+  const photonOrbit = (a, sign = +1) => 2 * (1 + Math.cos((2 / 3) * Math.acos(-sign * a)));
+
+  /** Critical impact parameter b = L_z/E of the equatorial photon orbit:
+      b = ±3·sqrt(r_ph) − a   (→ ±3√3 at a = 0, +2 / −7 at a = 1). */
+  const criticalImpact = (a, sign = +1) => sign * 3 * Math.sqrt(photonOrbit(a, sign)) - a;
+
+  /** Keplerian angular velocity of prograde circular equatorial orbits [B72 eq. 2.16]. */
+  const omega = (r, a) => 1 / (Math.pow(r, 1.5) + a);
+
+  /** u^t of the circular orbit: u^t = (1 + a r^-3/2) / sqrt(1 − 3/r + 2a r^-3/2)  [B72 eq. 2.12–2.13]. */
+  function orbitUt(r, a) {
+    const s = Math.pow(r, -1.5);
+    return (1 + a * s) / Math.sqrt(Math.max(1e-12, 1 - 3 / r + 2 * a * s));
+  }
+
+  /** Page–Thorne time-averaged energy flux from the disk surface, F(r)·(8π/3Ṁ)
+      [PT74 eq. 15n; NT73 eq. 5.6.14b].  Zero at the ISCO, ∝ r⁻³ far away. */
+  function pageThorneFlux(r, a) {
+    const aa = Math.max(a, 1e-7);                      // a = 0 is a removable singularity of the formula
+    const x = Math.sqrt(r), x0 = Math.sqrt(isco(aa));
+    if (x <= x0) return 0;
+    const th = Math.acos(aa);
+    const x1 = 2 * Math.cos((th - Math.PI) / 3);
+    const x2 = 2 * Math.cos((th + Math.PI) / 3);
+    const x3 = -2 * Math.cos(th / 3);                  // x1,x2,x3: roots of x³ − 3x + 2a = 0
+    const term = (xi, xj, xk) =>
+      (3 * (xi - aa) * (xi - aa)) / (xi * (xi - xj) * (xi - xk)) * Math.log((x - xi) / (x0 - xi));
+    const bracket = x - x0 - 1.5 * aa * Math.log(x / x0)
+      - term(x1, x2, x3) - term(x2, x1, x3) - term(x3, x1, x2);
+    return Math.max(0, bracket / (x * x * x * x * (x * x * x - 3 * x + 2 * aa)));
+  }
+
+  /* ── Kerr–Schild coordinates ────────────────────────────────────────────────
+     We use the *outgoing* Cartesian Kerr–Schild form
+         g_μν = η_μν + f l_μ l_ν ,      f = 2 r³ / (r⁴ + a² z²) ,
+         l_μ  = ( −1 , (r x − a y)/(r²+a²) , (r y + a x)/(r²+a²) , z/r ) ,
+     with r(x,y,z) defined by  r⁴ − (x²+y²+z²−a²) r² − a² z² = 0 .
+     It is the time-reverse of Kerr's ingoing form, so it is regular on the *past*
+     horizon: exactly what backward ray tracing needs (past-directed rays cross
+     r+ smoothly instead of piling up on it), and it has no polar-axis
+     singularity.  ∂_t and x∂_y − y∂_x are the same Killing vectors as in
+     Boyer–Lindquist, so E, L_z and the orbital frequency Ω carry over directly. */
+  function ksRadius(a, x, y, z) {
+    const w = x * x + y * y + z * z - a * a;
+    return Math.sqrt(0.5 * (w + Math.sqrt(w * w + 4 * a * a * z * z)));
+  }
+
+  /** Covariant metric g_μν (index order t,x,y,z) as a flat 16-array. */
+  function ksMetric(a, x, y, z) {
+    const r = ksRadius(a, x, y, z), r2 = r * r, P = r2 + a * a;
+    const f = (2 * r2 * r) / (r2 * r2 + a * a * z * z);
+    const l = [-1, (r * x - a * y) / P, (r * y + a * x) / P, z / r];
+    const g = new Float64Array(16);
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) g[i * 4 + j] = f * l[i] * l[j];
+    g[0] -= 1; g[5] += 1; g[10] += 1; g[15] += 1;
+    return g;
+  }
+
+  /** Hamilton's equations for H = ½ g^μν q_μ q_ν with g^μν = η^μν − f l^μ l^ν.
+      State s = [x,y,z,q_x,q_y,q_z]; q_t is conserved.  Writes ds/dλ into o.
+          dx^i/dλ =  q_i − f (l·q) l_i ,           (l·q) ≡ q_t + l_i q_i
+          dq_i/dλ =  ½ ∂_i f (l·q)² + f (l·q) (∂_i l_j) q_j                    */
+  function geodesicRHS(a, s, qt, o) {
+    const x = s[0], y = s[1], z = s[2], qx = s[3], qy = s[4], qz = s[5];
+    const a2 = a * a;
+    const w = x * x + y * y + z * z - a2;
+    const D = Math.sqrt(w * w + 4 * a2 * z * z);       // D = 2r² − R² + a² = (r⁴ + a²z²)/r²
+    const r2 = 0.5 * (w + D), r = Math.sqrt(r2), P = r2 + a2;
+    const f = 2 * r / D;
+    const lx = (r * x - a * y) / P, ly = (r * y + a * x) / P, lz = z / r;
+    const lq = qt + lx * qx + ly * qy + lz * qz;
+    // ∇r
+    const rx = x * r / D, ry = y * r / D, rz = z * P / (r * D);
+    // ∇f = [2(3a²z² − r⁴) ∇r − 4 a² r z ẑ] / (r² D²)
+    const fc = 2 * (3 * a2 * z * z - r2 * r2) / (r2 * D * D);
+    const fx = fc * rx, fy = fc * ry, fz = fc * rz - 4 * a2 * r * z / (r2 * D * D);
+    // (∂_i l_j) q_j
+    const A = (x * qx + y * qy - 2 * r * (lx * qx + ly * qy)) / P;
+    const B = qz * z / r2;
+    const gx = A * rx + (r * qx + a * qy) / P - B * rx;
+    const gy = A * ry + (r * qy - a * qx) / P - B * ry;
+    const gz = A * rz + qz / r - B * rz;
+    const flq = f * lq;
+    o[0] = qx - flq * lx; o[1] = qy - flq * ly; o[2] = qz - flq * lz;
+    o[3] = 0.5 * fx * lq * lq + flq * gx;
+    o[4] = 0.5 * fy * lq * lq + flq * gy;
+    o[5] = 0.5 * fz * lq * lq + flq * gz;
+    return r;
+  }
+
+  /** Adaptive affine step: proportional to the distance from the horizon near the
+      hole (fine steps through the photon region), growing to a fraction of r far away. */
+  function stepSize(r, rh, quality) {
+    const d = r - 0.6 * rh;
+    return quality * Math.max(0.01, d * (0.045 + 0.2 * d / (d + 40)));
+  }
+
+  /** One classical RK4 step of size h (in place).  tmp: scratch of ≥ 30 floats. */
+  function rk4(a, s, qt, h, tmp) {
+    const k1 = tmp.subarray(0, 6), k2 = tmp.subarray(6, 12), k3 = tmp.subarray(12, 18),
+          k4 = tmp.subarray(18, 24), t = tmp.subarray(24, 30);
+    geodesicRHS(a, s, qt, k1);
+    for (let i = 0; i < 6; i++) t[i] = s[i] + 0.5 * h * k1[i];
+    geodesicRHS(a, t, qt, k2);
+    for (let i = 0; i < 6; i++) t[i] = s[i] + 0.5 * h * k2[i];
+    geodesicRHS(a, t, qt, k3);
+    for (let i = 0; i < 6; i++) t[i] = s[i] + h * k3[i];
+    geodesicRHS(a, t, qt, k4);
+    for (let i = 0; i < 6; i++) s[i] += (h / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]);
+  }
+
+  /** Trace one past-directed null geodesic.
+      Returns { fate: 'horizon' | 'escape' | 'steps', steps, rmin, dir:[3], hits:[{x,y,r,g}] }. */
+  function trace(a, pos, q, opts = {}) {
+    const rh = horizon(a), maxSteps = opts.maxSteps || 4000, quality = opts.quality || 1;
+    const rEsc = opts.rEscape || 1000, rIn = opts.rIn || 0, rOut = opts.rOut || 0;
+    const s = new Float64Array([pos[0], pos[1], pos[2], q[1], q[2], q[3]]), qt = q[0];
+    const tmp = new Float64Array(30), v = new Float64Array(6);
+    const Lz = s[0] * s[4] - s[1] * s[3];
+    const hits = [];
+    let rmin = Infinity, fate = 'steps', n = 0;
+    for (; n < maxSteps; n++) {
+      const r = ksRadius(a, s[0], s[1], s[2]);
+      if (r < rmin) rmin = r;
+      if (r < rh * 1.0005) { fate = 'horizon'; break; }
+      if (r > rEsc && s[0] * s[3] + s[1] * s[4] + s[2] * s[5] > 0) { fate = 'escape'; break; }
+      const h = stepSize(r, rh, quality);
+      const z0 = s[2], x0 = s[0], y0 = s[1];
+      rk4(a, s, qt, h, tmp);
+      if (rOut > 0 && z0 * s[2] < 0) {                 // equatorial-plane crossing (linear interpolation here;
+        const u = z0 / (z0 - s[2]);                    //  the GPU tracer uses a cubic Hermite refinement)
+        const hx = x0 + (s[0] - x0) * u, hy = y0 + (s[1] - y0) * u;
+        const rd = Math.sqrt(Math.max(0, hx * hx + hy * hy - a * a));
+        if (rd >= rIn && rd <= rOut) hits.push({ x: hx, y: hy, r: rd, g: 1 / (orbitUt(rd, a) * (qt + omega(rd, a) * Lz)) });
+      }
+    }
+    geodesicRHS(a, s, qt, v);
+    const vn = Math.hypot(v[0], v[1], v[2]);
+    return { fate, steps: n, rmin, dir: [v[0] / vn, v[1] / vn, v[2] / vn], hits, state: s };
+  }
+
+  /* ── Camera tetrad ──────────────────────────────────────────────────────────
+     The observer is a ZAMO (zero-angular-momentum observer, the "locally
+     non-rotating frame" of [B72]):  u ∝ ∂_t + ω ∂_φ with ω = −g_tφ/g_φφ, valid
+     everywhere outside the horizon.  The spatial legs come from Gram–Schmidt
+     (with the full metric) on the camera's forward/right/up axes, so aberration
+     and frame dragging are built into the initial photon momenta.
+     Returns the four legs with indices lowered, (e_a)_μ, as [t,x,y,z] arrays. */
+  function cameraTetrad(a, pos, right, up, fwd) {
+    const g = ksMetric(a, pos[0], pos[1], pos[2]);
+    const dot = (u, v) => {
+      let s = 0;
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) s += g[i * 4 + j] * u[i] * v[j];
+      return s;
+    };
+    const Kt = [1, 0, 0, 0], Kp = [0, -pos[1], pos[0], 0];
+    const gpp = dot(Kp, Kp);
+    const w = gpp > 1e-9 ? -dot(Kt, Kp) / gpp : 0;
+    let e0 = [1, -w * pos[1], w * pos[0], 0];
+    const n0 = Math.sqrt(-dot(e0, e0));
+    e0 = e0.map((c) => c / n0);
+    const legs = [e0];
+    for (const d of [fwd, right, up]) {
+      let v = [0, d[0], d[1], d[2]];
+      const c0 = dot(v, e0);
+      v = v.map((c, i) => c + c0 * e0[i]);             // remove the timelike part (u·u = −1)
+      for (let k = 1; k < legs.length; k++) {
+        const ck = dot(v, legs[k]);
+        v = v.map((c, i) => c - ck * legs[k][i]);
+      }
+      const nv = Math.sqrt(dot(v, v));
+      legs.push(v.map((c) => c / nv));
+    }
+    const lower = (u) => [0, 1, 2, 3].map((i) => g[i * 4] * u[0] + g[i * 4 + 1] * u[1] + g[i * 4 + 2] * u[2] + g[i * 4 + 3] * u[3]);
+    return { e0: lower(legs[0]), e3: lower(legs[1]), e1: lower(legs[2]), e2: lower(legs[3]), u: legs[0], omegaZamo: w };
+  }
+
+  /** Past-directed photon momentum q_μ for local direction n = (right, up, forward):
+      q = −e_0 + n^a e_a  (unit locally measured energy). */
+  function photonMomentum(tet, n) {
+    return [0, 1, 2, 3].map((i) => -tet.e0[i] + n[0] * tet.e1[i] + n[1] * tet.e2[i] + n[2] * tet.e3[i]);
+  }
+
+  return { horizon, isco, photonOrbit, criticalImpact, omega, orbitUt, pageThorneFlux,
+           ksRadius, ksMetric, geodesicRHS, stepSize, rk4, trace, cameraTetrad, photonMomentum };
+})();
+
+/* ════════════════════════════════════════════════════════════════════════════
+   2. LOOKUP TABLES (built once on the CPU)
+   ════════════════════════════════════════════════════════════════════════════ */
+const Tables = (() => {
+  const LUT_N = 512;            // table width
+  const T_MIN = 500, T_MAX = 40000;   // blackbody table range [K], log-spaced
+
+  /** CIE 1931 2° colour-matching functions: multi-lobe Gaussian fit of
+      Wyman, Sloan & Shirley 2013 (JCGT 2(2)), accurate to ~1 %. λ in nm. */
+  function cie1931(l) {
+    const g = (x, mu, s1, s2) => { const t = (x - mu) * (x < mu ? s1 : s2); return Math.exp(-0.5 * t * t); };
+    return [
+      0.362 * g(l, 442.0, 0.0624, 0.0374) + 1.056 * g(l, 599.8, 0.0264, 0.0323) - 0.065 * g(l, 501.1, 0.0490, 0.0382),
+      0.821 * g(l, 568.8, 0.0213, 0.0247) + 0.286 * g(l, 530.9, 0.0613, 0.0322),
+      1.217 * g(l, 437.0, 0.0845, 0.0278) + 0.681 * g(l, 459.0, 0.0385, 0.0725),
+    ];
+  }
+
+  /** CIE XYZ of a blackbody: ∫ B_λ(T) · (x̄,ȳ,z̄) dλ over 380–780 nm (Planck's law). */
+  function planckXYZ(T) {
+    const c2 = 1.438776877e7;   // hc/k in nm·K
+    let X = 0, Y = 0, Z = 0;
+    for (let l = 380; l <= 780; l += 2) {
+      const B = 1 / (Math.pow(l * 1e-3, 5) * Math.expm1(c2 / (l * T)));
+      const c = cie1931(l);
+      X += B * c[0]; Y += B * c[1]; Z += B * c[2];
+    }
+    return [X, Y, Z];
+  }
+
+  /** XYZ (D65) → linear Display-P3. */
+  const XYZ_TO_P3 = [
+     2.4934969, -0.9313836, -0.4027108,
+    -0.8294890,  1.7626641,  0.0236247,
+     0.0358458, -0.0761724,  0.9568845,
+  ];
+  /** Linear Display-P3 → linear sRGB (for outputs that cannot present P3). */
+  const P3_TO_SRGB = [
+     1.2249401, -0.2249404,  0.0000000,
+    -0.0420569,  1.0420571,  0.0000000,
+    -0.0196376, -0.0786361,  1.0982735,
+  ];
+
+  /** Blackbody chromaticity at unit luminance, linear Display-P3, gamut-clipped. */
+  function blackbodyP3(T) {
+    const [X, Y, Z] = planckXYZ(T);
+    const m = XYZ_TO_P3, x = X / Y, z = Z / Y;
+    let r = Math.max(0, m[0] * x + m[1] + m[2] * z);
+    let g = Math.max(0, m[3] * x + m[4] + m[5] * z);
+    let b = Math.max(0, m[6] * x + m[7] + m[8] * z);
+    const lum = 0.2289746 * r + 0.6917385 * g + 0.0792869 * b;   // P3 luminance weights
+    return [r / lum, g / lum, b / lum];
+  }
+
+  /** Row 0: blackbody colour vs log T.  Row 1: Page–Thorne flux F(r)/F_max vs
+      sqrt((r − r_in)/(r_out − r_in)).  Returns { data: Float32Array(RGBA), gain }.
+      gain normalises the *observed* bolometric radiance F·g⁴ of a face-on view to 1 at its peak. */
+  let bbRow = null;
+  function buildLUT(a, rIn, rOut) {
+    const data = new Float32Array(LUT_N * 2 * 4);
+    if (!bbRow) {
+      bbRow = new Float32Array(LUT_N * 4);
+      for (let i = 0; i < LUT_N; i++) {
+        const T = T_MIN * Math.pow(T_MAX / T_MIN, i / (LUT_N - 1));
+        const c = blackbodyP3(T);
+        bbRow.set([c[0], c[1], c[2], 1], i * 4);
+      }
+    }
+    data.set(bbRow, 0);
+    let fmax = 0, rPeak = rIn;
+    for (let r = rIn; r <= rOut; r += 0.002) { const F = Kerr.pageThorneFlux(r, a); if (F > fmax) { fmax = F; rPeak = r; } }
+    let obsPeak = 0;
+    for (let i = 0; i < LUT_N; i++) {
+      const s = i / (LUT_N - 1), r = rIn + (rOut - rIn) * s * s;
+      const F = Kerr.pageThorneFlux(r, a) / fmax;
+      data[(LUT_N + i) * 4] = F;
+      const g = 1 / Kerr.orbitUt(Math.max(r, rIn * 1.0001), a);
+      obsPeak = Math.max(obsPeak, F * g * g * g * g);
+    }
+    return { data, gain: 1 / obsPeak, rPeak };
+  }
+
+  /** Tileable 3D gradient (Perlin) noise, size³ texels, `period` lattice cells per tile. */
+  function buildNoise(size, period) {
+    let seed = 0x2f6e2b1;
+    const rnd = () => { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return (seed >>> 0) / 4294967296; };
+    const n = period, grads = new Float32Array(n * n * n * 3);
+    for (let i = 0; i < n * n * n; i++) {
+      const z = rnd() * 2 - 1, ph = rnd() * 2 * Math.PI, s = Math.sqrt(1 - z * z);
+      grads.set([s * Math.cos(ph), s * Math.sin(ph), z], i * 3);
+    }
+    const fade = (t) => t * t * t * (t * (t * 6 - 15) + 10);
+    const out = new Uint8Array(size * size * size);
+    const ix = new Int32Array(size * 2), fx = new Float32Array(size), wx = new Float32Array(size);
+    for (let i = 0; i < size; i++) {
+      const p = (i + 0.5) / size * n, i0 = Math.floor(p);
+      ix[i * 2] = i0 % n; ix[i * 2 + 1] = (i0 + 1) % n; fx[i] = p - i0; wx[i] = fade(p - i0);
+    }
+    let o = 0;
+    for (let k = 0; k < size; k++) for (let j = 0; j < size; j++) for (let i = 0; i < size; i++) {
+      let v = 0;
+      for (let c = 0; c < 8; c++) {
+        const cx = c & 1, cy = (c >> 1) & 1, cz = (c >> 2) & 1;
+        const gi = (ix[i * 2 + cx] + n * (ix[j * 2 + cy] + n * ix[k * 2 + cz])) * 3;
+        const d = grads[gi] * (fx[i] - cx) + grads[gi + 1] * (fx[j] - cy) + grads[gi + 2] * (fx[k] - cz);
+        v += d * (cx ? wx[i] : 1 - wx[i]) * (cy ? wx[j] : 1 - wx[j]) * (cz ? wx[k] : 1 - wx[k]);
+      }
+      out[o++] = Math.max(0, Math.min(255, Math.round((0.5 + 0.75 * v) * 255)));
+    }
+    return out;
+  }
+
+  /** IEEE float32 → float16 bits (for rgba16float uploads). */
+  const toHalf = (() => {
+    const f = new Float32Array(1), u = new Uint32Array(f.buffer);
+    return (v) => {
+      f[0] = v;
+      const x = u[0], s = (x >>> 16) & 0x8000, e = ((x >>> 23) & 0xff) - 112, m = x & 0x7fffff;
+      if (e <= 0) return e < -10 ? s : s | (((m | 0x800000) >>> (1 - e)) + 0x1000 >>> 13);
+      if (e >= 31) return s | 0x7c00;
+      return s + (e << 10) + ((m + 0x1000) >>> 13);
+    };
+  })();
+  const toHalfArray = (src) => { const d = new Uint16Array(src.length); for (let i = 0; i < src.length; i++) d[i] = toHalf(src[i]); return d; };
+
+  return { LUT_N, T_MIN, T_MAX, buildLUT, buildNoise, blackbodyP3, planckXYZ, toHalfArray, P3_TO_SRGB };
+})();
+
+/* ════════════════════════════════════════════════════════════════════════════
+   3. SHADERS
+   ════════════════════════════════════════════════════════════════════════════ */
+const WGSL_COMMON = /* wgsl */ `
+// Shared uniform block. Every field is a vec4f so the layout is identical in
+// WGSL (std140-like) and in the Float32Array written from JavaScript.
+struct Uniforms {
+  camPos : vec4f,  // xyz: camera position (Kerr–Schild), w: tan(fovY / 2)
+  e0     : vec4f,  // camera tetrad, covariant components stored as (x, y, z, t)
+  e1     : vec4f,  //   e1 = right, e2 = up, e3 = forward
+  e2     : vec4f,
+  e3     : vec4f,
+  bh     : vec4f,  // x: spin a, y: horizon r+, z: r_ISCO (disk inner edge), w: disk outer edge
+  traceA : vec4f,  // x,y: ray-cache size being traced, z,w: first / one-past-last row of this band
+  traceB : vec4f,  // x,y: sub-pixel jitter, z: max steps per ray, w: aspect ratio
+  traceC : vec4f,  // x: step-size factor, y: |camera position|, z: escape radius
+  shadeA : vec4f,  // x,y: ray-cache size being shaded, z: time (units of M), w: frame counter
+  shadeB : vec4f,  // x: supersample correction on/off, y: disk layers, z: noise octaves, w: light-delay on/off
+  disk   : vec4f,  // x: peak emitted temperature [K], y: Doppler→colour mix, z: Doppler→beaming mix, w: radiance gain
+  disk2  : vec4f,  // x: turbulence cross-fade period, y: vertical optical depth, z: H/r, w: mean density
+  sky    : vec4f,  // x: sky gain, y: angular size of a mip-0 cubemap texel, z: max LOD
+  post   : vec4f,  // x: exposure, y: bloom strength, z: HDR peak (× SDR white, 0 = SDR), w: grain
+  post2  : vec4f,  // x: vignette, y,z: output size in pixels
+  taa    : vec4f,  // x: blend alpha, y: reprojection scale, z,w: jitter of the shaded frame
+  taa2   : vec4f,  // x,y: shaded size, z,w: accumulation target size
+  lut    : vec4f,  // x: T_min, y: T_max of the blackbody table, z: table width
+};
+`;
+
+const WGSL_TRACE = /* wgsl */ `
+// ─────────────────────────────────────────────────────────────────────────────
+// GEODESIC TRACER (compute).  One past-directed null geodesic per pixel,
+// integrated in outgoing Cartesian Kerr–Schild coordinates (see section 1).
+// The result is written to the ray cache; nothing here depends on time, so the
+// cache stays valid until the camera or the spin changes.
+//
+// Ray record = 4 × vec4u per pixel:
+//   [0] escape direction xyz (f32 bits) | pack(g_sky, code)
+//       code = fate (bit 0: 1 = escaped to the sky, 0 = fell through the horizon)
+//            + crossings << 1 + vertical-direction bits << 3
+//   [1..3] one per equatorial crossing, front to back:
+//       hit x, hit y (f32 bits) | pack(redshift g, light delay) | pack(dx/dz, dy/dz)
+// ─────────────────────────────────────────────────────────────────────────────
+@group(0) @binding(0) var<uniform> u : Uniforms;
+@group(0) @binding(1) var<storage, read_write> cache : array<vec4u>;
+
+struct RHS { dx : vec3f, dq : vec3f };
+
+// Kerr–Schild radius: r⁴ − (R² − a²) r² − a² z² = 0.
+fn ksRadius(p : vec3f, a : f32) -> f32 {
+  let w = dot(p, p) - a * a;
+  return sqrt(0.5 * (w + sqrt(w * w + 4.0 * a * a * p.z * p.z)));
+}
+
+// Hamilton's equations for H = ½ g^μν q_μ q_ν,  g^μν = η^μν − f l^μ l^ν :
+//   dx/dλ = q − f (l·q) l            (l·q) ≡ q_t + l_i q_i
+//   dq/dλ = ½ (l·q)² ∇f + f (l·q) (∇l_j) q_j
+fn geodesicRHS(p : vec3f, q : vec3f, qt : f32, a : f32) -> RHS {
+  let a2 = a * a;
+  let w = dot(p, p) - a2;
+  let D = sqrt(w * w + 4.0 * a2 * p.z * p.z);          // D = (r⁴ + a² z²) / r²
+  let r2 = 0.5 * (w + D);
+  let r = sqrt(r2);
+  let P = r2 + a2;
+  let f = 2.0 * r / D;                                  // f = 2 r³ / (r⁴ + a² z²)
+  let l = vec3f((r * p.x - a * p.y) / P, (r * p.y + a * p.x) / P, p.z / r);
+  let lq = qt + dot(l, q);
+  let gr = vec3f(p.x * r / D, p.y * r / D, p.z * P / (r * D));             // ∇r
+  let fc = 2.0 * (3.0 * a2 * p.z * p.z - r2 * r2) / (r2 * D * D);
+  let gf = fc * gr - vec3f(0.0, 0.0, 4.0 * a2 * r * p.z / (r2 * D * D));   // ∇f
+  let A = (p.x * q.x + p.y * q.y - 2.0 * r * (l.x * q.x + l.y * q.y)) / P;
+  let B = q.z * p.z / r2;
+  let gl = (A - B) * gr + vec3f((r * q.x + a * q.y) / P, (r * q.y - a * q.x) / P, q.z / r);
+  let flq = f * lq;
+  return RHS(q - flq * l, 0.5 * lq * lq * gf + flq * gl);
+}
+
+// 8×8 = 64 threads per workgroup: two full 32-wide SIMD groups on Apple GPUs.
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+  let cw = u32(u.traceA.x);
+  let ch = u32(u.traceA.y);
+  let px = vec2u(gid.x, gid.y + u32(u.traceA.z));
+  if (px.x >= cw || px.y >= u32(u.traceA.w) || px.y >= ch) { return; }
+
+  let a = u.bh.x;
+  let rh = u.bh.y;
+  let rin2 = u.bh.z * u.bh.z;
+  let rout2 = u.bh.w * u.bh.w;
+
+  // Pixel → unit direction in the camera's local orthonormal frame → photon
+  // momentum through the tetrad:  q_μ = −(e_0)_μ + n^a (e_a)_μ   (past-directed).
+  let uv = (vec2f(px) + vec2f(0.5) + u.traceB.xy) / vec2f(f32(cw), f32(ch));
+  let tanH = u.camPos.w;
+  let n = normalize(vec3f((uv.x * 2.0 - 1.0) * tanH * u.traceB.w, (1.0 - uv.y * 2.0) * tanH, 1.0));
+  let q4 = -u.e0 + n.x * u.e1 + n.y * u.e2 + n.z * u.e3;
+
+  var p = u.camPos.xyz;
+  var q = q4.xyz;
+  let qt = q4.w;                                        // conserved: E_∞ per unit local energy
+  let Lz = p.x * q.y - p.y * q.x;                       // conserved axial angular momentum
+
+  var hits : array<vec4u, 3>;
+  var nhit = 0u;
+  var signs = 0u;
+  var fate = 0u;
+  var path = 0.0;
+  let maxSteps = i32(u.traceB.z);
+  let quality = u.traceC.x;
+  let rEsc = u.traceC.z;
+
+  // Bounded loop (uniform upper limit) keeps divergence within a workgroup in check.
+  for (var i = 0; i < maxSteps; i++) {
+    let r = ksRadius(p, a);
+    if (r < rh * 1.0005) { break; }                               // through the horizon: black
+    if (r > rEsc && dot(p, q) > 0.0) { fate = 1u; break; }       // escaped: sample the sky
+
+    // Adaptive step: ∝ distance from the horizon nearby, ∝ r far away.
+    let d = r - 0.6 * rh;
+    let h = quality * max(0.01, d * (0.045 + 0.2 * d / (d + 40.0)));
+
+    // Classical RK4.
+    let k1 = geodesicRHS(p, q, qt, a);
+    let k2 = geodesicRHS(p + 0.5 * h * k1.dx, q + 0.5 * h * k1.dq, qt, a);
+    let k3 = geodesicRHS(p + 0.5 * h * k2.dx, q + 0.5 * h * k2.dq, qt, a);
+    let k4 = geodesicRHS(p + h * k3.dx, q + h * k3.dq, qt, a);
+    let pn = p + (h / 6.0) * (k1.dx + 2.0 * k2.dx + 2.0 * k3.dx + k4.dx);
+    let qn = q + (h / 6.0) * (k1.dq + 2.0 * k2.dq + 2.0 * k3.dq + k4.dq);
+    let seg = length(pn - p);
+
+    // Equatorial-plane crossing → locate it on the cubic Hermite interpolant.
+    if (p.z * pn.z < 0.0 && nhit < 3u) {
+      let m0 = h * k1.dx;
+      let m1 = h * geodesicRHS(pn, qn, qt, a).dx;
+      var t = p.z / (p.z - pn.z);
+      for (var j = 0; j < 2; j++) {
+        let t2 = t * t;
+        let t3 = t2 * t;
+        let zt = (2.0 * t3 - 3.0 * t2 + 1.0) * p.z + (t3 - 2.0 * t2 + t) * m0.z + (3.0 * t2 - 2.0 * t3) * pn.z + (t3 - t2) * m1.z;
+        let dz = (6.0 * t2 - 6.0 * t) * (p.z - pn.z) + (3.0 * t2 - 4.0 * t + 1.0) * m0.z + (3.0 * t2 - 2.0 * t) * m1.z;
+        if (abs(dz) > 1e-9) { t = clamp(t - zt / dz, 0.0, 1.0); }
+      }
+      let t2 = t * t;
+      let t3 = t2 * t;
+      let hp = (2.0 * t3 - 3.0 * t2 + 1.0) * p + (t3 - 2.0 * t2 + t) * m0 + (3.0 * t2 - 2.0 * t3) * pn + (t3 - t2) * m1;
+      let hv = (6.0 * t2 - 6.0 * t) * (p - pn) + (3.0 * t2 - 4.0 * t + 1.0) * m0 + (3.0 * t2 - 2.0 * t) * m1;
+      let rd2 = dot(hp.xy, hp.xy) - a * a;              // Boyer–Lindquist r² in the equatorial plane
+      if (rd2 > rin2 && rd2 < rout2) {
+        let rd = sqrt(rd2);
+        let s15 = 1.0 / (rd * sqrt(rd));
+        let om = 1.0 / (rd * sqrt(rd) + a);                                    // Ω = 1/(r^1.5 + a)   [B72]
+        let ut = (1.0 + a * s15) / sqrt(max(1e-6, 1.0 - 3.0 / rd + 2.0 * a * s15));
+        // Redshift g = ν_obs/ν_emit = (q·u_obs)/(q·u_gas) with q·u_obs = 1 and
+        // q·u_gas = u^t (q_t + Ω L_z): gravitational + Doppler shift in one factor.
+        let g = 1.0 / (ut * (qt + om * Lz));
+        let vz = select(-1.0, 1.0, hv.z >= 0.0) * max(abs(hv.z), 1e-5);
+        var sl = hv.xy / vz;                            // d(x,y)/dz along the ray
+        let sll = length(sl);
+        if (sll > 30.0) { sl *= 30.0 / sll; }
+        let delay = path + t * seg - u.traceC.y;
+        hits[nhit] = vec4u(bitcast<u32>(hp.x), bitcast<u32>(hp.y),
+                           pack2x16float(vec2f(clamp(g, 0.0, 16.0), clamp(delay, -500.0, 4000.0))),
+                           pack2x16float(sl));
+        if (hv.z >= 0.0) { signs |= (1u << nhit); }
+        nhit++;
+      }
+    }
+    path += seg;
+    p = pn;
+    q = qn;
+  }
+
+  let dir = normalize(geodesicRHS(p, q, qt, a).dx);
+  let code = f32(fate + (nhit << 1u) + (signs << 3u));
+  let base = (px.y * cw + px.x) * 4u;
+  cache[base] = vec4u(bitcast<u32>(dir.x), bitcast<u32>(dir.y), bitcast<u32>(dir.z), pack2x16float(vec2f(1.0 / qt, code)));
+  cache[base + 1u] = hits[0];
+  cache[base + 2u] = hits[1];
+  cache[base + 3u] = hits[2];
+}
+`;
+
+const WGSL_SHADE = /* wgsl */ `
+// ─────────────────────────────────────────────────────────────────────────────
+// SHADING (fragment).  Re-shades the cached geodesics every frame: the animated
+// accretion disk at every equatorial crossing (front to back, with opacity) and
+// the lensed sky behind it.  All radiometry is linear-light Display-P3.
+// ─────────────────────────────────────────────────────────────────────────────
+@group(0) @binding(0) var<uniform> u : Uniforms;
+@group(0) @binding(1) var<storage, read> cache : array<vec4u>;
+@group(0) @binding(2) var lutTex : texture_2d<f32>;     // row 0: blackbody colour, row 1: Page–Thorne flux
+@group(0) @binding(3) var linClamp : sampler;
+@group(0) @binding(4) var noiseTex : texture_3d<f32>;   // tileable gradient noise (single channel)
+@group(0) @binding(5) var linRepeat : sampler;
+@group(0) @binding(6) var skyTex : texture_cube<f32>;   // procedural starfield + Milky Way (mip-mapped)
+@group(0) @binding(7) var s0Tex : texture_2d<f32>;      // static shading of the current jitter sample
+@group(0) @binding(8) var sbarTex : texture_2d<f32>;    // running mean of static shading over all jitter samples
+@group(0) @binding(9) var skyCacheTex : texture_2d<f32>; // lensed sky of the current sample (static while the camera rests)
+
+struct Rec { dir : vec3f, gsky : f32, fate : u32, nhit : u32, signs : u32 };
+
+fn readRec(idx : u32) -> Rec {
+  let w = cache[idx * 4u];
+  let m = unpack2x16float(w.w);
+  let code = u32(m.y + 0.5);
+  return Rec(bitcast<vec3f>(w.xyz), m.x, code & 1u, (code >> 1u) & 3u, (code >> 3u) & 7u);
+}
+
+// Chromaticity of a blackbody at temperature T (unit luminance, linear Display-P3).
+// The table is the Planck spectrum integrated against the CIE 1931 colour-matching
+// functions on the CPU; no artistic ramp is involved.
+fn blackbody(T : f32) -> vec3f {
+  let t = clamp(log(T / u.lut.x) / log(u.lut.y / u.lut.x), 0.0, 1.0);
+  return textureSampleLevel(lutTex, linClamp, vec2f((t * (u.lut.z - 1.0) + 0.5) / u.lut.z, 0.25), 0.0).rgb;
+}
+
+// Page–Thorne flux F(r)/F_max: zero at the ISCO, peaks just outside it.
+fn diskFlux(r : f32) -> f32 {
+  let t = sqrt(clamp((r - u.bh.z) / (u.bh.w - u.bh.z), 0.0, 1.0));
+  return textureSampleLevel(lutTex, linClamp, vec2f((t * (u.lut.z - 1.0) + 0.5) / u.lut.z, 0.75), 0.0).r;
+}
+
+// Turbulent gas density at disk position p (height z), time t.
+// The noise lives in co-rotating coordinates ψ = φ − Ω(r) τ, so it is advected
+// and sheared by Keplerian differential rotation.  Shear would wind the pattern
+// up without bound, so two copies with staggered phase clocks τ ∈ [−P/2, P/2]
+// are cross-faded: each is re-seeded while its weight is zero.
+fn diskDensity(p : vec2f, z : f32, t : f32, fp : vec2f, octaves : i32) -> f32 {
+  let a = u.bh.x;
+  let r = sqrt(max(dot(p, p) - a * a, 1e-3));
+  let phi = atan2(p.y, p.x);
+  let om = 1.0 / (r * sqrt(r) + a);
+  let period = u.disk2.x;
+  var acc = 0.0;
+  var wsum = 0.0;
+  for (var j = 0; j < 2; j++) {
+    let ph = t / period + 0.5 * f32(j);
+    let cyc = floor(ph);
+    let fr = ph - cyc;
+    let w = 1.0 - abs(2.0 * fr - 1.0);
+    let psi = phi - om * (fr - 0.5) * period;
+    let c = cos(psi);
+    let s = sin(psi);
+    let seed = vec3f(fract(cyc * 0.61803 + 0.25 * f32(j)), fract(cyc * 0.75488 + 0.5 * f32(j)), fract(cyc * 0.56984));
+    var n = 0.0;
+    var amp = 1.0;
+    var f = 1.0;
+    for (var i = 0; i < octaves; i++) {
+      // Fade octaves that fall below the pixel footprint (analytic anti-aliasing).
+      // fp = footprint (radial, azimuthal) in M; the streak lattice has 1.5 f cells
+      // per M in radius and 2.6 f / r along the orbit, the clump lattice 0.45 f.
+      let fadeS = 1.0 - smoothstep(0.3, 0.9, max(fp.x * 1.5, fp.y * 2.6 / r) * f);
+      let fadeC = 1.0 - smoothstep(0.3, 0.9, max(fp.x, fp.y) * 0.45 * f);
+      // "streaks": fine in radius, long in azimuth (periodic in ψ by construction).
+      let cs = vec3f(r * 1.5, 2.6 * c, 2.6 * s) * (f / 16.0) + seed + vec3f(0.37, 0.11, 0.73) * f32(i);
+      // "clumps": isotropic in the co-rotating frame; shear draws them into trailing filaments.
+      let cc = vec3f(r * c, r * s, z * 3.0) * (0.45 * f / 16.0) + seed.zxy + vec3f(0.19, 0.61, 0.41) * f32(i);
+      let ns = textureSampleLevel(noiseTex, linRepeat, cs, 0.0).r - 0.5;
+      let nc = textureSampleLevel(noiseTex, linRepeat, cc, 0.0).r - 0.5;
+      n += amp * (1.45 * fadeS * ns + 0.7 * fadeC * nc);
+      amp *= 0.55;
+      f *= 2.07;
+    }
+    acc += w * n;
+    wsum += w * w;
+  }
+  // Dividing by sqrt(Σw²) keeps the contrast constant through the cross-fade.
+  return smoothstep(-0.7, 0.55, acc / sqrt(max(wsum, 1e-4)));
+}
+
+// Emission and opacity of one disk crossing.  Returns premultiplied radiance + alpha.
+fn shadeDisk(hp : vec2f, g : f32, delay : f32, slope : vec2f, upward : bool, fp : vec2f,
+             gsky : f32, primary : bool, animated : bool) -> vec4f {
+  let a = u.bh.x;
+  let rin = u.bh.z;
+  let rout = u.bh.w;
+  let r = sqrt(max(dot(hp, hp) - a * a, rin * rin));
+  let flux = diskFlux(r);
+
+  // Purely gravitational (+ transverse Doppler) part of the redshift: g for L_z = 0.
+  let s15 = 1.0 / (r * sqrt(r));
+  let ggrav = gsky * sqrt(max(1e-6, 1.0 - 3.0 / r + 2.0 * a * s15)) / (1.0 + a * s15);
+  let gcol = mix(ggrav, g, u.disk.y);                   // "Physical": full g.  "Cinematic": gravity only.
+  let gint = mix(ggrav, g, u.disk.z);
+
+  // I_ν/ν³ is invariant along the ray, so a blackbody at T_emit is seen as a
+  // blackbody at T_obs = g·T_emit with bolometric radiance ∝ g⁴ T_emit⁴ ∝ g⁴ F(r).
+  let Tobs = u.disk.x * pow(max(flux, 1e-8), 0.25) * gcol;
+  let gi2 = gint * gint;
+  let rad = blackbody(Tobs) * (flux * gi2 * gi2 * u.disk.w);
+
+  // Vertical optical depth: fades to zero at the ISCO (plunging gas) and at the outer rim.
+  let edge = smoothstep(rin, rin * 1.3 + 0.3, r) * (1.0 - smoothstep(rout * 0.7, rout, r));
+  let tau0 = u.disk2.y * edge;
+  let pathf = min(sqrt(1.0 + dot(slope, slope)), 5.0);  // slant path through the slab
+
+  // A few layers through the (thin) vertical extent, offset along the ray, give
+  // parallax and depth.  The parallax slope is capped: the slab is a visual
+  // thickness on a geometrically thin disk.
+  let sl = length(slope);
+  let par = slope * min(1.0, 2.5 / max(sl, 1e-4));
+  let H = u.disk2.z * r;
+  var nl = 1;
+  if (primary && animated) { nl = i32(u.shadeB.y); }
+  let t = u.shadeA.z - delay * u.shadeB.w;
+  let octaves = i32(u.shadeB.z);
+  var em = vec3f(0.0);
+  var trans = 1.0;
+  for (var k = 0; k < nl; k++) {
+    var zeta = ((f32(k) + 0.5) / f32(nl) * 2.0 - 1.0) * 0.85;
+    if (!upward) { zeta = -zeta; }
+    var dens = u.disk2.w;
+    if (animated) { dens = diskDensity(hp + par * (zeta * H), zeta * H, t, fp, octaves); }
+    let alpha = 1.0 - exp(-tau0 * pathf * dens * 2.2 / f32(nl));
+    em += trans * alpha * rad * (0.3 + 1.25 * dens);
+    trans *= 1.0 - alpha;
+  }
+  return vec4f(em, 1.0 - trans);
+}
+
+// ── Lensed sky ──────────────────────────────────────────────────────────────
+// dx, dy are the changes of the escape direction to the neighbouring pixels (ray
+// differentials); together they span this pixel's footprint on the celestial sphere.
+
+// Diffuse sky (Milky Way, nebulosity, unresolved star carpet) from the cubemap.
+// The footprint selects the mip level; when it is stretched (near the Einstein
+// ring) several taps are spread along its long axis.
+fn skyDiffuse(dir : vec3f, dx : vec3f, dy : vec3f) -> vec3f {
+  let lx = length(dx);
+  let ly = length(dy);
+  var major = dx;
+  var lmaj = lx;
+  var lmin = ly;
+  if (ly > lx) { major = dy; lmaj = ly; lmin = lx; }
+  let taps = clamp(ceil(lmaj / max(lmin, 1e-6)), 1.0, 6.0);
+  let lod = clamp(log2(max(lmin, lmaj / taps) / u.sky.y), 0.0, u.sky.z);
+  var c = vec3f(0.0);
+  let nt = i32(taps);
+  for (var i = 0; i < nt; i++) {
+    let t = (f32(i) + 0.5) / taps - 0.5;
+    c += textureSampleLevel(skyTex, linClamp, dir + major * t, lod).rgb;
+  }
+  return c / taps;
+}
+
+fn pcg(v : u32) -> u32 {
+  let s = v * 747796405u + 2891336453u;
+  let w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+  return (w >> 22u) ^ w;
+}
+fn u01(h : u32) -> f32 { return f32(h >> 8u) * (1.0 / 16777216.0); }
+
+// Point-source stars.  Space is cut into unit cells of a lattice scaled by N; a
+// cell may hold one star, kept only if it lies in the thin shell |x| ≈ N, which
+// makes the surface density uniform.  A star is unresolved, so however strongly
+// it is lensed its image stays a point: it is splatted with a fixed pixel-sized
+// Gaussian located through the inverse of the footprint, and its radiance scales
+// with 1 / (footprint solid angle), i.e. with the lensing magnification.  Stars
+// therefore brighten toward the Einstein ring and never smear or shimmer.
+fn starLayer(dir : vec3f, dx : vec3f, dy : vec3f, N : f32, prob : f32, fluxMin : f32, fluxMax : f32, seed : u32) -> vec3f {
+  let g11 = dot(dx, dx);
+  let g22 = dot(dy, dy);
+  let g12 = dot(dx, dy);
+  let det0 = g11 * g22 - g12 * g12;
+  let det = max(det0, 0.1 * g11 * g22 + 1e-30);
+  // On a caustic (the Einstein ring) the footprint collapses to a line and the
+  // linearised inverse breaks down: fade the point sources out there.
+  let caustic = smoothstep(0.02, 0.12, det0 / (g11 * g22 + 1e-30));
+  let base = vec3i(floor(dir * N - vec3f(0.5)));
+  var acc = vec3f(0.0);
+  for (var k = 0; k < 8; k++) {
+    let cell = base + vec3i(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+    let h0 = pcg(u32(cell.x) + pcg(u32(cell.y) + pcg(u32(cell.z) + seed)));
+    let h1 = pcg(h0);
+    let h2 = pcg(h1);
+    let sp = vec3f(cell) + vec3f(u01(h0), u01(h1), u01(h2));
+    let sl = length(sp);
+    if (abs(sl - N) > 0.5) { continue; }
+    let dv = sp / sl - dir;
+    let b1 = dot(dv, dx);
+    let b2 = dot(dv, dy);
+    let pu = (g22 * b1 - g12 * b2) / det;               // star position in pixel units
+    let pv = (g11 * b2 - g12 * b1) / det;
+    let e = (pu * pu + pv * pv) * 1.3889;               // Gaussian, σ = 0.6 px
+    if (e > 12.0) { continue; }
+    let h3 = pcg(h2);
+    if (u01(h3) > prob) { continue; }
+    let h4 = pcg(h3);
+    let h5 = pcg(h4);
+    let h6 = pcg(h5);
+    // Cumulative counts N(>F) ∝ F^-1.25 (d log N / dm ≈ 0.5, as in the real sky).
+    let flux = min(fluxMin * pow(max(u01(h4), 1e-6), -0.8), fluxMax);
+    // Effective temperatures: mostly K–F stars, with a tail of hot O/B/A stars.
+    var T = 3000.0 + 4200.0 * pow(u01(h5), 1.6);
+    let hot = u01(h6);
+    if (hot > 0.86) { T = 7500.0 + 22000.0 * pow((hot - 0.86) / 0.14, 2.0); }
+    acc += blackbody(T) * (flux * exp(-e));
+  }
+  return acc * (caustic / sqrt(det));
+}
+
+fn skyRadiance(dir : vec3f, dx : vec3f, dy : vec3f, dims : vec2i) -> vec3f {
+  var c = skyDiffuse(dir, dx, dy);
+  // Caustic clamp: the footprint may not shrink below ~1/20 of the unlensed pixel
+  // (and not collapse to a line), which bounds the point-source magnification.
+  let floorLen = 2.0 * u.camPos.w / f32(dims.y) * 0.224;
+  let lx = length(dx);
+  let ly = length(dy);
+  var sx = dx;
+  var sy = dy;
+  if (lx < floorLen) { sx = select(dx / max(lx, 1e-20), normalize(cross(dir, vec3f(0.31, 0.52, 0.80))), lx < 1e-12) * floorLen; }
+  if (ly < floorLen) { sy = select(dy / max(ly, 1e-20), normalize(cross(dir, vec3f(0.74, -0.33, 0.58))), ly < 1e-12) * floorLen; }
+  // Fluxes are in units of (radiance) × (9e-8 sr): a 1.0 star peaks at ~1.0 on a 4K-class display.
+  c += (starLayer(dir, sx, sy, 14.0, 0.30, 0.55, 40.0, 11u)       // ≈ 0.7 k bright stars
+      + starLayer(dir, sx, sy, 40.0, 0.35, 0.07, 4.0, 23u)        // ≈ 7 k
+      + starLayer(dir, sx, sy, 90.0, 0.30, 0.012, 0.6, 37u)       // ≈ 30 k
+      + starLayer(dir, sx, sy, 150.0, 0.30, 0.004, 0.15, 59u))    // ≈ 85 k faint
+      * 3.98e-8;                                                   // 9e-8 sr / (2π σ²)
+  return c;
+}
+
+fn hitXY(idx : u32, k : u32) -> vec2f {
+  let h = cache[idx * 4u + 1u + k];
+  return vec2f(bitcast<f32>(h.x), bitcast<f32>(h.y));
+}
+
+fn skyDelta(idx : u32, dir : vec3f) -> vec3f {
+  let w = cache[idx * 4u];
+  let fate = u32(unpack2x16float(w.w).y + 0.5) & 1u;
+  if (fate == 0u) { return vec3f(0.3, 0.0, 0.0); }      // neighbour fell in: treat as a huge footprint
+  return bitcast<vec3f>(w.xyz) - dir;
+}
+
+struct Shaded { col : vec3f, sky : vec3f, trans : f32 };
+
+// Shade one cached geodesic.  mode: 0 = static (no time dependence), 1 = animated,
+// 2 = animated, disk only (the caller adds the cached sky × the returned transmittance).
+fn shadePixel(pix : vec2i, dims : vec2i, mode : i32) -> Shaded {
+  let animated = mode != 0;
+  let idx = u32(pix.y * dims.x + pix.x);
+  let rec = readRec(idx);
+  let xp = min(pix.x + 1, dims.x - 1);
+  let xm = max(pix.x - 1, 0);
+  let yp = min(pix.y + 1, dims.y - 1);
+  let ym = max(pix.y - 1, 0);
+  let iXp = u32(pix.y * dims.x + xp);
+  let iXm = u32(pix.y * dims.x + xm);
+  let iYp = u32(yp * dims.x + pix.x);
+  let iYm = u32(ym * dims.x + pix.x);
+
+  var col = vec3f(0.0);
+  var trans = 1.0;
+  for (var k = 0u; k < rec.nhit; k++) {
+    let h = cache[idx * 4u + 1u + k];
+    let hp = vec2f(bitcast<f32>(h.x), bitcast<f32>(h.y));
+    let gd = unpack2x16float(h.z);
+    let sl = unpack2x16float(h.w);
+    // Pixel footprint on the disk from the neighbouring rays (smaller of the ±1
+    // differences), resolved into radial and azimuthal extent.
+    var ex = hitXY(iXp, k) - hp;
+    let ex2 = hitXY(iXm, k) - hp;
+    if (xp == pix.x || (xm != pix.x && dot(ex2, ex2) < dot(ex, ex))) { ex = ex2; }
+    var ey = hitXY(iYp, k) - hp;
+    let ey2 = hitXY(iYm, k) - hp;
+    if (yp == pix.y || (ym != pix.y && dot(ey2, ey2) < dot(ey, ey))) { ey = ey2; }
+    let rhat = normalize(hp);
+    let that = vec2f(-rhat.y, rhat.x);
+    let fp = min(vec2f(max(abs(dot(ex, rhat)), abs(dot(ey, rhat))), max(abs(dot(ex, that)), abs(dot(ey, that)))), vec2f(4.0));
+    let d = shadeDisk(hp, gd.x, gd.y, sl, ((rec.signs >> k) & 1u) == 1u, fp, rec.gsky, k == 0u, animated);
+    col += trans * d.rgb;
+    trans *= 1.0 - d.a;
+    if (trans < 0.004) { break; }
+  }
+  var sky = vec3f(0.0);
+  if (rec.fate == 1u && mode != 2) {
+    // Ray differentials: the smaller of the forward / backward differences (one-sided at the border).
+    var dx = skyDelta(iXp, rec.dir);
+    let dx2 = skyDelta(iXm, rec.dir);
+    if (xp == pix.x || (xm != pix.x && dot(dx2, dx2) < dot(dx, dx))) { dx = dx2; }
+    var dy = skyDelta(iYp, rec.dir);
+    let dy2 = skyDelta(iYm, rec.dir);
+    if (yp == pix.y || (ym != pix.y && dot(dy2, dy2) < dot(dy, dy))) { dy = dy2; }
+    // Starlight reaching the (ZAMO) camera is blueshifted by g_sky = 1/E_∞: radiance × g⁴.
+    let g2 = rec.gsky * rec.gsky;
+    sky = skyRadiance(rec.dir, dx, dy, dims) * (u.sky.x * g2 * g2);
+    col += trans * sky;
+  }
+  return Shaded(col, sky, trans);
+}
+
+@vertex
+fn vs(@builtin(vertex_index) i : u32) -> @builtin(position) vec4f {
+  let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
+  return vec4f(p * 2.0 - 1.0, 0.0, 1.0);
+}
+
+// Animated pass: one cached geodesic per pixel.  When the camera is at rest the
+// result is corrected by the jitter-supersampled *static* image:
+//   S0   = time-independent shading of this pixel's single cached sample,
+//   Sbar = mean of that shading over all jittered samples traced so far,
+// so  out = A · Sbar/S0  (or A + Sbar − S0 where the sample under-covers).
+// Interior pixels are unchanged (Sbar ≈ S0); edges, the photon ring and stars
+// receive true supersampled coverage while the disk keeps animating.
+@fragment
+fn fsAnimated(@builtin(position) pos : vec4f) -> @location(0) vec4f {
+  let pix = vec2i(pos.xy);
+  let cached = u.shadeB.x > 0.5;
+  let sh = shadePixel(pix, vec2i(u.shadeA.xy), select(1, 2, cached));
+  var col = sh.col;
+  if (cached) {
+    col += sh.trans * textureLoad(skyCacheTex, pix, 0).rgb;   // zero where the ray fell into the hole
+    let s0 = textureLoad(s0Tex, pix, 0).rgb;
+    let sb = textureLoad(sbarTex, pix, 0).rgb;
+    col = select(col + (sb - s0), col * sb / max(s0, vec3f(1e-6)), sb < s0);
+  }
+  return vec4f(max(col, vec3f(0.0)), 1.0);
+}
+
+struct StaticOut { @location(0) s0 : vec4f, @location(1) sbar : vec4f, @location(2) sky : vec4f };
+
+// Static pass: runs once per freshly traced band.  Target 1 is blended with
+// weight 1/n (blend constant) to maintain the running mean; target 2 caches the
+// lensed sky so the animated pass does not have to recompute it every frame.
+@fragment
+fn fsStatic(@builtin(position) pos : vec4f) -> StaticOut {
+  let sh = shadePixel(vec2i(pos.xy), vec2i(u.traceA.xy), 0);
+  let c = vec4f(sh.col, 1.0);
+  return StaticOut(c, c, vec4f(sh.sky, 1.0));
+}
+`;
+
+const WGSL_POST = /* wgsl */ `
+// ─────────────────────────────────────────────────────────────────────────────
+// POST-PROCESSING.  Everything up to the tone curve is linear HDR.
+// ─────────────────────────────────────────────────────────────────────────────
+@group(0) @binding(0) var<uniform> u : Uniforms;
+@group(0) @binding(1) var texA : texture_2d<f32>;
+@group(0) @binding(2) var texB : texture_2d<f32>;
+@group(0) @binding(3) var samp : sampler;
+
+struct VSOut { @builtin(position) pos : vec4f, @location(0) uv : vec2f };
+
+@vertex
+fn vs(@builtin(vertex_index) i : u32) -> VSOut {
+  let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
+  return VSOut(vec4f(p * 2.0 - 1.0, 0.0, 1.0), vec2f(p.x, 1.0 - p.y));
+}
+
+// ── Temporal resolve ────────────────────────────────────────────────────────
+// While the camera moves the scene is traced at reduced resolution with a
+// different sub-pixel jitter every frame.  This pass upsamples it, reprojects
+// the previous result (orbit camera: the hole stays centred, so reprojection is
+// a scale about the screen centre for dolly moves) and accumulates.  History is
+// clamped to the current neighbourhood to reject stale lensing.
+// texA = current shaded frame (possibly a sub-rectangle), texB = history.
+@fragment
+fn fsResolve(in : VSOut) -> @location(0) vec4f {
+  let low = u.taa2.xy;
+  let full = u.taa2.zw;
+  let uv = in.pos.xy / full;
+  let ts = vec2f(textureDimensions(texA));
+  let sp = uv * low - u.taa.zw;                          // position in shaded-frame pixels (jitter removed)
+  let lo = vec2f(0.5);
+  let hi = low - vec2f(0.5);
+  let cur = textureSampleLevel(texA, samp, clamp(sp, lo, hi) / ts, 0.0).rgb;
+  let alpha = u.taa.x;
+  if (alpha >= 0.999) { return vec4f(cur, 1.0); }
+  let c1 = textureSampleLevel(texA, samp, clamp(sp + vec2f(1.0, 0.0), lo, hi) / ts, 0.0).rgb;
+  let c2 = textureSampleLevel(texA, samp, clamp(sp - vec2f(1.0, 0.0), lo, hi) / ts, 0.0).rgb;
+  let c3 = textureSampleLevel(texA, samp, clamp(sp + vec2f(0.0, 1.0), lo, hi) / ts, 0.0).rgb;
+  let c4 = textureSampleLevel(texA, samp, clamp(sp - vec2f(0.0, 1.0), lo, hi) / ts, 0.0).rgb;
+  let mn = min(cur, min(min(c1, c2), min(c3, c4)));
+  let mx = max(cur, max(max(c1, c2), max(c3, c4)));
+  let uvp = (uv - vec2f(0.5)) * u.taa.y + vec2f(0.5);
+  var hist = textureSampleLevel(texB, samp, uvp, 0.0).rgb;
+  if (uvp.x < 0.0 || uvp.y < 0.0 || uvp.x > 1.0 || uvp.y > 1.0) { hist = cur; }
+  hist = clamp(hist, mn, mx);
+  return vec4f(mix(hist, cur, alpha), 1.0);
+}
+
+// ── Bloom ────────────────────────────────────────────────────────────────────
+// Energy-conserving multi-scale glare.  A chain of 13-tap downsamples, then
+// tent upsamples blended so that every octave of radius carries equal energy:
+// the resulting point-spread function falls off like 1/θ², the profile of
+// aperture/ocular scatter (Spencer et al. 1995), not a single gaussian smear.
+// The composite *mixes* scene and glare, so no energy is added.
+@fragment
+fn fsDown(in : VSOut) -> @location(0) vec4f {
+  let ts = 1.0 / vec2f(textureDimensions(texA));
+  let uv = in.uv;
+  let e = textureSampleLevel(texA, samp, uv, 0.0).rgb;
+  let a = textureSampleLevel(texA, samp, uv + ts * vec2f(-2.0, -2.0), 0.0).rgb;
+  let b = textureSampleLevel(texA, samp, uv + ts * vec2f(0.0, -2.0), 0.0).rgb;
+  let c = textureSampleLevel(texA, samp, uv + ts * vec2f(2.0, -2.0), 0.0).rgb;
+  let d = textureSampleLevel(texA, samp, uv + ts * vec2f(-2.0, 0.0), 0.0).rgb;
+  let f = textureSampleLevel(texA, samp, uv + ts * vec2f(2.0, 0.0), 0.0).rgb;
+  let g = textureSampleLevel(texA, samp, uv + ts * vec2f(-2.0, 2.0), 0.0).rgb;
+  let h = textureSampleLevel(texA, samp, uv + ts * vec2f(0.0, 2.0), 0.0).rgb;
+  let i = textureSampleLevel(texA, samp, uv + ts * vec2f(2.0, 2.0), 0.0).rgb;
+  let j = textureSampleLevel(texA, samp, uv + ts * vec2f(-1.0, -1.0), 0.0).rgb;
+  let k = textureSampleLevel(texA, samp, uv + ts * vec2f(1.0, -1.0), 0.0).rgb;
+  let l = textureSampleLevel(texA, samp, uv + ts * vec2f(-1.0, 1.0), 0.0).rgb;
+  let m = textureSampleLevel(texA, samp, uv + ts * vec2f(1.0, 1.0), 0.0).rgb;
+  return vec4f(e * 0.125 + (a + c + g + i) * 0.03125 + (b + d + f + h) * 0.0625 + (j + k + l + m) * 0.125, 1.0);
+}
+
+// 3×3 tent upsample; the pipeline blends it into the next-larger level with a
+// constant factor (see the bloom chain in the renderer).
+@fragment
+fn fsUp(in : VSOut) -> @location(0) vec4f {
+  let ts = 1.0 / vec2f(textureDimensions(texA));
+  let uv = in.uv;
+  var c = textureSampleLevel(texA, samp, uv, 0.0).rgb * 4.0;
+  c += (textureSampleLevel(texA, samp, uv + ts * vec2f(-1.0, 0.0), 0.0).rgb + textureSampleLevel(texA, samp, uv + ts * vec2f(1.0, 0.0), 0.0).rgb
+      + textureSampleLevel(texA, samp, uv + ts * vec2f(0.0, -1.0), 0.0).rgb + textureSampleLevel(texA, samp, uv + ts * vec2f(0.0, 1.0), 0.0).rgb) * 2.0;
+  c += textureSampleLevel(texA, samp, uv + ts * vec2f(-1.0, -1.0), 0.0).rgb + textureSampleLevel(texA, samp, uv + ts * vec2f(1.0, -1.0), 0.0).rgb
+     + textureSampleLevel(texA, samp, uv + ts * vec2f(-1.0, 1.0), 0.0).rgb + textureSampleLevel(texA, samp, uv + ts * vec2f(1.0, 1.0), 0.0).rgb;
+  return vec4f(c / 16.0, 1.0);
+}
+
+// Plain bilinear copy (used to build the cubemap mip chain: a 2×2 box filter).
+@fragment
+fn fsBlit(in : VSOut) -> @location(0) vec4f {
+  return textureSampleLevel(texA, samp, in.uv, 0.0);
+}
+
+// ── Output transform ────────────────────────────────────────────────────────
+// AgX (Troy Sobotka), minimal fit by Benjamin Wrensch, with the "punchy" look.
+fn agxContrast(x : vec3f) -> vec3f {
+  let x2 = x * x;
+  let x4 = x2 * x2;
+  return 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232;
+}
+
+fn agx(c : vec3f) -> vec3f {
+  let inset = mat3x3f(0.842479062253094, 0.0423282422610123, 0.0423756549057051,
+                      0.0784335999999992, 0.878468636469772, 0.0784336,
+                      0.0792237451477643, 0.0791661274605434, 0.879142973793104);
+  let outset = mat3x3f(1.19687900512017, -0.0528968517574562, -0.0529716355144438,
+                       -0.0980208811401368, 1.15190312990417, -0.0980434501171241,
+                       -0.0989611768448433, -0.0989417417135567, 1.15107367264116);
+  let minEv = -12.47393;
+  let maxEv = 4.026069;
+  var v = inset * max(c, vec3f(0.0));
+  v = clamp(log2(max(v, vec3f(1e-10))), vec3f(minEv), vec3f(maxEv));
+  v = agxContrast((v - minEv) / (maxEv - minEv));
+  // Look ("punchy"): ASC-CDL power 1.35, saturation 1.4.
+  let luma = dot(v, vec3f(0.2126, 0.7152, 0.0722));
+  v = pow(max(v, vec3f(0.0)), vec3f(1.35));
+  v = luma + 1.4 * (v - luma);
+  v = outset * v;
+  return pow(clamp(v, vec3f(0.0), vec3f(1.0)), vec3f(2.2));   // back to linear display light
+}
+
+// HDR: no highlight compression until far above SDR white.  A mild contrast
+// power (matched to the AgX rendering in the shadows and mid-tones, so both
+// outputs share one exposure) followed by a smooth exponential shoulder that
+// approaches, and never clips at, the chosen peak.  It acts on the brightest
+// channel so hue is preserved; the very top eases toward white like a hot emitter.
+fn hdrCurve(c : vec3f, peak : f32) -> vec3f {
+  let m = max(c.r, max(c.g, c.b));
+  if (m <= 1e-6) { return vec3f(0.0); }
+  var mp = 1.25 * pow(m, 1.3);
+  if (mp > 1.0) {
+    let span = peak - 1.0;
+    mp = 1.0 + span * (1.0 - exp(-(mp - 1.0) / span));
+  }
+  let scaled = c * (mp / m);
+  let w = smoothstep(0.55 * peak, peak, mp) * 0.5;
+  return mix(scaled, vec3f(mp), w);
+}
+
+// sRGB / Display-P3 transfer function, extended antisymmetrically beyond [0,1]
+// (that is how an rgba16float canvas with toneMapping "extended" encodes HDR).
+fn oetf(c : vec3f) -> vec3f {
+  let a = abs(c);
+  let lo = a * 12.92;
+  let hi = 1.055 * pow(a, vec3f(1.0 / 2.4)) - 0.055;
+  return sign(c) * select(hi, lo, a <= vec3f(0.0031308));
+}
+
+fn hash12(p : vec2f, s : f32) -> f32 {
+  var p3 = fract(vec3f(p.xyx) * 0.1031 + s * 0.071);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
+// texA = accumulated HDR frame, texB = bloom (half resolution).
+@fragment
+fn fsComposite(in : VSOut) -> @location(0) vec4f {
+  let uv = in.uv;
+  var c = textureSampleLevel(texA, samp, uv, 0.0).rgb;
+  let bloom = textureSampleLevel(texB, samp, uv, 0.0).rgb;
+  c = mix(c, bloom, u.post.y);                             // energy-conserving glare
+  let d = (uv - vec2f(0.5)) * vec2f(u.post2.y / u.post2.z, 1.0);
+  let v = 1.0 / (1.0 + u.post2.x * dot(d, d));
+  c *= u.post.x * v * v;                                   // exposure × natural (cos⁴-like) vignette
+  if (u.post.z > 0.0) { c = hdrCurve(c, u.post.z); } else { c = agx(c); }
+  var e = oetf(c);
+  // Film grain: zero-mean, in the display-encoded domain, strongest in the mid-tones.
+  let n = hash12(in.pos.xy, fract(u.shadeA.w * 0.0173) * 61.0) + hash12(in.pos.yx + 17.0, fract(u.shadeA.w * 0.0291) * 47.0) - 1.0;
+  let l = clamp(dot(e, vec3f(0.3, 0.6, 0.1)), 0.0, 1.0);
+  e += n * u.post.w * (0.25 + 0.75 * sqrt(l) * (1.0 - 0.6 * l));
+  return vec4f(e, 1.0);
+}
+`;
+
+const WGSL_SKY = /* wgsl */ `
+// ─────────────────────────────────────────────────────────────────────────────
+// SKY GENERATOR.  Renders the procedural celestial sphere into one cubemap face
+// (run once per face at start-up; the mip chain is built afterwards).
+// It holds everything that is extended or unresolved: the Milky Way band with
+// dust lanes and nebulosity, and the unresolved star clouds of the galactic
+// plane (power-law fluxes, blackbody colours).  The stars that can be told
+// apart are true point sources and are drawn in the shading pass instead, so
+// that lensing magnifies their brightness without smearing them.
+// ─────────────────────────────────────────────────────────────────────────────
+struct SkyGen { face : vec4f };   // x: face index, y: face size (texels), z: star sigma (radians)
+@group(0) @binding(0) var<uniform> gen : SkyGen;
+@group(0) @binding(1) var lutTex : texture_2d<f32>;
+@group(0) @binding(2) var linClamp : sampler;
+@group(0) @binding(3) var noiseTex : texture_3d<f32>;
+@group(0) @binding(4) var linRepeat : sampler;
+
+@vertex
+fn vs(@builtin(vertex_index) i : u32) -> @builtin(position) vec4f {
+  let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
+  return vec4f(p * 2.0 - 1.0, 0.0, 1.0);
+}
+
+fn pcg(v : u32) -> u32 {
+  let s = v * 747796405u + 2891336453u;
+  let w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+  return (w >> 22u) ^ w;
+}
+fn u01(h : u32) -> f32 { return f32(h >> 8u) * (1.0 / 16777216.0); }
+
+// Blackbody chromaticity (same table as the disk).  T range 500 K … 40000 K.
+fn blackbody(T : f32) -> vec3f {
+  let t = clamp(log(T / 500.0) / log(80.0), 0.0, 1.0);
+  return textureSampleLevel(lutTex, linClamp, vec2f((t * 511.0 + 0.5) / 512.0, 0.25), 0.0).rgb;
+}
+
+fn fbm(p : vec3f, octaves : i32) -> f32 {
+  var s = 0.0;
+  var amp = 0.5;
+  var q = p / 16.0;
+  for (var i = 0; i < octaves; i++) {
+    s += amp * (textureSampleLevel(noiseTex, linRepeat, q, 0.0).r - 0.5) * 2.0;
+    q = q.yzx * 2.03 + vec3f(0.31, 0.57, 0.13);
+    amp *= 0.5;
+  }
+  return s;
+}
+
+// Galactic frame: band normal ng, centre direction gc.
+const NG = vec3f(0.0, 0.5, 0.8660254);
+const GC = vec3f(-0.7071068, -0.6123724, 0.3535534);
+
+fn bandProfile(d : vec3f) -> vec2f {
+  let sb = dot(d, NG);                                    // sin(galactic latitude)
+  let cl = dot(normalize(d - sb * NG), GC);               // cos(longitude from the centre)
+  let width = 0.11 + 0.09 * smoothstep(-0.2, 1.0, cl);    // thicker toward the bulge
+  return vec2f(sb / width, cl);
+}
+
+// One layer of stars.  Space is cut into unit cells of a lattice scaled by N; a
+// cell may hold one star, kept only if it lies in the thin shell |x| ≈ N so the
+// surface density is uniform and seamless across cube faces.
+fn starLayer(d : vec3f, N : f32, prob : f32, peakMin : f32, peakMax : f32, sigma : f32, seed : u32, band : f32) -> vec3f {
+  let p = d * N;
+  let base = vec3i(floor(p - vec3f(0.5)));
+  var acc = vec3f(0.0);
+  let inv = 0.5 / (sigma * sigma);
+  for (var k = 0; k < 8; k++) {
+    let cell = base + vec3i(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+    let h0 = pcg(u32(cell.x) + pcg(u32(cell.y) + pcg(u32(cell.z) + seed)));
+    let h1 = pcg(h0);
+    let h2 = pcg(h1);
+    let h3 = pcg(h2);
+    let h4 = pcg(h3);
+    let h5 = pcg(h4);
+    let h6 = pcg(h5);
+    let sp = vec3f(cell) + vec3f(u01(h0), u01(h1), u01(h2));
+    let sl = length(sp);
+    if (abs(sl - N) > 0.5) { continue; }
+    let sd = sp / sl;
+    let dv = sd - d;
+    let e = dot(dv, dv) * inv;
+    if (e > 14.0) { continue; }
+    // band = 1: stars only in the galactic plane (star clouds).
+    let bp = bandProfile(sd);
+    let dens = mix(1.0, 2.4 * exp(-bp.x * bp.x * 0.9), band);
+    if (u01(h3) > prob * dens) { continue; }
+    // Cumulative counts N(>F) ∝ F^-1.25 (d log N / dm ≈ 0.5, as in the real sky).
+    let peak = min(peakMin * pow(max(u01(h4), 1e-6), -0.8), peakMax);
+    // Effective temperatures: mostly K–F dwarfs and giants, a tail of hot O/B/A stars.
+    var T = 3000.0 + 4200.0 * pow(u01(h5), 1.6);
+    let hot = u01(h6);
+    if (hot > 0.86) { T = 7500.0 + 22000.0 * pow((hot - 0.86) / 0.14, 2.0); }
+    acc += blackbody(T) * (peak * exp(-e));
+  }
+  // Peaks are quoted for a 2048² cubemap; scaling by (σ_ref/σ)² keeps each star's flux
+  // independent of the cubemap resolution.
+  let sref = 5.371e-4 / sigma;
+  return acc * (sref * sref);
+}
+
+fn milkyWay(d : vec3f) -> vec3f {
+  let bp = bandProfile(d);
+  let warp = fbm(d * 2.3 + vec3f(3.1, 1.7, 0.4), 4);
+  let b = bp.x + 0.55 * warp;
+  let lon = 0.35 + 0.65 * smoothstep(-1.0, 1.0, bp.y);
+  let bulge = exp(-(1.0 - bp.y) * 9.0 - bp.x * bp.x * 0.35);
+  var glow = exp(-b * b) * lon * (0.75 + 0.9 * fbm(d * 6.0, 5)) + 1.3 * bulge;
+  glow = max(glow, 0.0);
+  // Dust lanes hug the mid-plane: they absorb and redden.
+  let dn = fbm(d * 7.5 + vec3f(warp * 1.5), 5);
+  let dust = smoothstep(-0.05, 0.4, dn + 0.25 * fbm(d * 19.0, 3)) * exp(-b * b * 3.5);
+  let starlight = mix(blackbody(4800.0), blackbody(8500.0), clamp(0.5 + 1.2 * fbm(d * 3.7 + vec3f(9.0), 3), 0.0, 1.0));
+  var c = starlight * glow * exp(-vec3f(1.6, 2.3, 3.2) * dust);
+  // Faint emission nebulae (Hα) along the plane and a touch of blue reflection.
+  let ha = pow(max(fbm(d * 11.0 + vec3f(5.5), 4) - 0.18, 0.0), 2.0) * exp(-b * b * 2.0);
+  let refl = pow(max(fbm(d * 8.0 + vec3f(-4.0, 2.0, 7.0), 4) - 0.22, 0.0), 2.0) * exp(-b * b * 1.2);
+  c += vec3f(1.0, 0.22, 0.30) * ha * 2.2 + vec3f(0.35, 0.55, 1.0) * refl * 1.2;
+  // Very faint isotropic background (unresolved stars / zodiacal floor).
+  return c * 0.024 + blackbody(5200.0) * 0.0004;
+}
+
+@fragment
+fn fs(@builtin(position) pos : vec4f) -> @location(0) vec4f {
+  let st = pos.xy / gen.face.y * 2.0 - 1.0;
+  let f = i32(gen.face.x + 0.5);
+  var d : vec3f;
+  // Standard cubemap face orientation (+X, −X, +Y, −Y, +Z, −Z).
+  switch (f) {
+    case 0  { d = vec3f(1.0, -st.y, -st.x); }
+    case 1  { d = vec3f(-1.0, -st.y, st.x); }
+    case 2  { d = vec3f(st.x, 1.0, st.y); }
+    case 3  { d = vec3f(st.x, -1.0, -st.y); }
+    case 4  { d = vec3f(st.x, -st.y, 1.0); }
+    default { d = vec3f(-st.x, -st.y, -1.0); }
+  }
+  d = normalize(d);
+  let sig = gen.face.z;
+  var c = milkyWay(d);
+  c += starLayer(d, 150.0, 0.30, 0.012, 0.16, sig, 53u, 1.0);   // ≈ 60 k unresolved stars confined to the galactic band
+  return vec4f(c, 1.0);
+}
+`;
+
+const GLSL_COMMON = /* glsl */ `
+// Shared uniform block for the GLSL ES 3.00 port: same 19 × vec4 layout as the WGSL struct.
+uniform vec4 U[19];
+#define u_camPos U[0]
+#define u_e0     U[1]
+#define u_e1     U[2]
+#define u_e2     U[3]
+#define u_e3     U[4]
+#define u_bh     U[5]
+#define u_traceA U[6]
+#define u_traceB U[7]
+#define u_traceC U[8]
+#define u_shadeA U[9]
+#define u_shadeB U[10]
+#define u_disk   U[11]
+#define u_disk2  U[12]
+#define u_sky    U[13]
+#define u_post   U[14]
+#define u_post2  U[15]
+#define u_lut    U[18]
+`;
+
+const GLSL_TRACE = /* glsl */ `
+// GEODESIC TRACER, fragment-shader port of the WGSL compute pass.  Writes the
+// same ray record into four RGBA32UI render targets (see the WGSL tracer for
+// the layout and the derivation of every formula).
+layout(location = 0) out uvec4 o0;
+layout(location = 1) out uvec4 o1;
+layout(location = 2) out uvec4 o2;
+layout(location = 3) out uvec4 o3;
+
+float ksRadius(vec3 p, float a) {
+  float w = dot(p, p) - a * a;
+  return sqrt(0.5 * (w + sqrt(w * w + 4.0 * a * a * p.z * p.z)));
+}
+
+// Hamilton's equations in outgoing Kerr–Schild coordinates.
+void geodesicRHS(vec3 p, vec3 q, float qt, float a, out vec3 dx, out vec3 dq) {
+  float a2 = a * a;
+  float w = dot(p, p) - a2;
+  float D = sqrt(w * w + 4.0 * a2 * p.z * p.z);
+  float r2 = 0.5 * (w + D);
+  float r = sqrt(r2);
+  float P = r2 + a2;
+  float f = 2.0 * r / D;
+  vec3 l = vec3((r * p.x - a * p.y) / P, (r * p.y + a * p.x) / P, p.z / r);
+  float lq = qt + dot(l, q);
+  vec3 gr = vec3(p.x * r / D, p.y * r / D, p.z * P / (r * D));
+  float fc = 2.0 * (3.0 * a2 * p.z * p.z - r2 * r2) / (r2 * D * D);
+  vec3 gf = fc * gr - vec3(0.0, 0.0, 4.0 * a2 * r * p.z / (r2 * D * D));
+  float A = (p.x * q.x + p.y * q.y - 2.0 * r * (l.x * q.x + l.y * q.y)) / P;
+  float B = q.z * p.z / r2;
+  vec3 gl = (A - B) * gr + vec3((r * q.x + a * q.y) / P, (r * q.y - a * q.x) / P, q.z / r);
+  float flq = f * lq;
+  dx = q - flq * l;
+  dq = 0.5 * lq * lq * gf + flq * gl;
+}
+
+void main() {
+  float a = u_bh.x, rh = u_bh.y;
+  float rin2 = u_bh.z * u_bh.z, rout2 = u_bh.w * u_bh.w;
+
+  vec2 uv = (gl_FragCoord.xy + u_traceB.xy) / u_traceA.xy;
+  float tanH = u_camPos.w;
+  vec3 n = normalize(vec3((uv.x * 2.0 - 1.0) * tanH * u_traceB.w, (uv.y * 2.0 - 1.0) * tanH, 1.0));
+  vec4 q4 = -u_e0 + n.x * u_e1 + n.y * u_e2 + n.z * u_e3;
+
+  vec3 p = u_camPos.xyz;
+  vec3 q = q4.xyz;
+  float qt = q4.w;
+  float Lz = p.x * q.y - p.y * q.x;
+
+  uvec4 hits[3];
+  hits[0] = uvec4(0u); hits[1] = uvec4(0u); hits[2] = uvec4(0u);
+  int nhit = 0;
+  uint signs = 0u;
+  uint fate = 0u;
+  float path = 0.0;
+  int maxSteps = int(u_traceB.z);
+  float quality = u_traceC.x;
+  float rEsc = u_traceC.z;
+  vec3 dx1, dq1, dx2, dq2, dx3, dq3, dx4, dq4, dxe, dqe;
+
+  for (int i = 0; i < maxSteps; i++) {
+    float r = ksRadius(p, a);
+    if (r < rh * 1.0005) break;
+    if (r > rEsc && dot(p, q) > 0.0) { fate = 1u; break; }
+    float d = r - 0.6 * rh;
+    float h = quality * max(0.01, d * (0.045 + 0.2 * d / (d + 40.0)));
+
+    geodesicRHS(p, q, qt, a, dx1, dq1);
+    geodesicRHS(p + 0.5 * h * dx1, q + 0.5 * h * dq1, qt, a, dx2, dq2);
+    geodesicRHS(p + 0.5 * h * dx2, q + 0.5 * h * dq2, qt, a, dx3, dq3);
+    geodesicRHS(p + h * dx3, q + h * dq3, qt, a, dx4, dq4);
+    vec3 pn = p + (h / 6.0) * (dx1 + 2.0 * dx2 + 2.0 * dx3 + dx4);
+    vec3 qn = q + (h / 6.0) * (dq1 + 2.0 * dq2 + 2.0 * dq3 + dq4);
+    float seg = length(pn - p);
+
+    if (p.z * pn.z < 0.0 && nhit < 3) {
+      geodesicRHS(pn, qn, qt, a, dxe, dqe);
+      vec3 m0 = h * dx1;
+      vec3 m1 = h * dxe;
+      float t = p.z / (p.z - pn.z);
+      for (int j = 0; j < 2; j++) {
+        float t2 = t * t, t3 = t2 * t;
+        float zt = (2.0 * t3 - 3.0 * t2 + 1.0) * p.z + (t3 - 2.0 * t2 + t) * m0.z + (3.0 * t2 - 2.0 * t3) * pn.z + (t3 - t2) * m1.z;
+        float dz = (6.0 * t2 - 6.0 * t) * (p.z - pn.z) + (3.0 * t2 - 4.0 * t + 1.0) * m0.z + (3.0 * t2 - 2.0 * t) * m1.z;
+        if (abs(dz) > 1e-9) t = clamp(t - zt / dz, 0.0, 1.0);
+      }
+      float t2 = t * t, t3 = t2 * t;
+      vec3 hp = (2.0 * t3 - 3.0 * t2 + 1.0) * p + (t3 - 2.0 * t2 + t) * m0 + (3.0 * t2 - 2.0 * t3) * pn + (t3 - t2) * m1;
+      vec3 hv = (6.0 * t2 - 6.0 * t) * (p - pn) + (3.0 * t2 - 4.0 * t + 1.0) * m0 + (3.0 * t2 - 2.0 * t) * m1;
+      float rd2 = dot(hp.xy, hp.xy) - a * a;
+      if (rd2 > rin2 && rd2 < rout2) {
+        float rd = sqrt(rd2);
+        float s15 = 1.0 / (rd * sqrt(rd));
+        float om = 1.0 / (rd * sqrt(rd) + a);
+        float ut = (1.0 + a * s15) / sqrt(max(1e-6, 1.0 - 3.0 / rd + 2.0 * a * s15));
+        float g = 1.0 / (ut * (qt + om * Lz));
+        float vz = (hv.z >= 0.0 ? 1.0 : -1.0) * max(abs(hv.z), 1e-5);
+        vec2 sl = hv.xy / vz;
+        float sll = length(sl);
+        if (sll > 30.0) sl *= 30.0 / sll;
+        float delay = path + t * seg - u_traceC.y;
+        hits[nhit] = uvec4(floatBitsToUint(hp.x), floatBitsToUint(hp.y),
+                           packHalf2x16(vec2(clamp(g, 0.0, 16.0), clamp(delay, -500.0, 4000.0))),
+                           packHalf2x16(sl));
+        if (hv.z >= 0.0) signs |= (1u << uint(nhit));
+        nhit++;
+      }
+    }
+    path += seg;
+    p = pn;
+    q = qn;
+  }
+
+  geodesicRHS(p, q, qt, a, dxe, dqe);
+  vec3 dir = normalize(dxe);
+  float code = float(fate + (uint(nhit) << 1u) + (signs << 3u));
+  o0 = uvec4(floatBitsToUint(dir.x), floatBitsToUint(dir.y), floatBitsToUint(dir.z), packHalf2x16(vec2(1.0 / qt, code)));
+  o1 = hits[0];
+  o2 = hits[1];
+  o3 = hits[2];
+}
+`;
+
+const GLSL_SHADE = /* glsl */ `
+// SHADING, GLSL port.  Same physics as the WGSL pass; the fallback pipeline has
+// no supersampling accumulation, so the lensed sky is evaluated every frame.
+uniform highp usampler2D uC0;     // ray record [0]
+uniform highp usampler2D uC1;     // crossings 1..3
+uniform highp usampler2D uC2;
+uniform highp usampler2D uC3;
+uniform sampler2D uLut;
+uniform highp sampler3D uNoise;
+uniform samplerCube uSkyTex;
+out vec4 fragColor;
+
+uvec4 hitRec(ivec2 p, int k) {
+  if (k == 0) return texelFetch(uC1, p, 0);
+  if (k == 1) return texelFetch(uC2, p, 0);
+  return texelFetch(uC3, p, 0);
+}
+vec2 hitXY(ivec2 p, int k) { uvec4 h = hitRec(p, k); return vec2(uintBitsToFloat(h.x), uintBitsToFloat(h.y)); }
+
+vec3 blackbody(float T) {
+  float t = clamp(log(T / u_lut.x) / log(u_lut.y / u_lut.x), 0.0, 1.0);
+  return textureLod(uLut, vec2((t * (u_lut.z - 1.0) + 0.5) / u_lut.z, 0.25), 0.0).rgb;
+}
+float diskFlux(float r) {
+  float t = sqrt(clamp((r - u_bh.z) / (u_bh.w - u_bh.z), 0.0, 1.0));
+  return textureLod(uLut, vec2((t * (u_lut.z - 1.0) + 0.5) / u_lut.z, 0.75), 0.0).r;
+}
+
+// Co-rotating, sheared turbulence with two cross-faded phase clocks (see WGSL).
+float diskDensity(vec2 p, float z, float t, vec2 fp, int octaves) {
+  float a = u_bh.x;
+  float r = sqrt(max(dot(p, p) - a * a, 1e-3));
+  float phi = atan(p.y, p.x);
+  float om = 1.0 / (r * sqrt(r) + a);
+  float period = u_disk2.x;
+  float acc = 0.0, wsum = 0.0;
+  for (int j = 0; j < 2; j++) {
+    float ph = t / period + 0.5 * float(j);
+    float cyc = floor(ph);
+    float fr = ph - cyc;
+    float w = 1.0 - abs(2.0 * fr - 1.0);
+    float psi = phi - om * (fr - 0.5) * period;
+    float c = cos(psi), s = sin(psi);
+    vec3 seed = vec3(fract(cyc * 0.61803 + 0.25 * float(j)), fract(cyc * 0.75488 + 0.5 * float(j)), fract(cyc * 0.56984));
+    float n = 0.0, amp = 1.0, f = 1.0;
+    for (int i = 0; i < octaves; i++) {
+      float fadeS = 1.0 - smoothstep(0.3, 0.9, max(fp.x * 1.5, fp.y * 2.6 / r) * f);
+      float fadeC = 1.0 - smoothstep(0.3, 0.9, max(fp.x, fp.y) * 0.45 * f);
+      vec3 cs = vec3(r * 1.5, 2.6 * c, 2.6 * s) * (f / 16.0) + seed + vec3(0.37, 0.11, 0.73) * float(i);
+      vec3 cc = vec3(r * c, r * s, z * 3.0) * (0.45 * f / 16.0) + seed.zxy + vec3(0.19, 0.61, 0.41) * float(i);
+      float ns = textureLod(uNoise, cs, 0.0).r - 0.5;
+      float nc = textureLod(uNoise, cc, 0.0).r - 0.5;
+      n += amp * (1.45 * fadeS * ns + 0.7 * fadeC * nc);
+      amp *= 0.55;
+      f *= 2.07;
+    }
+    acc += w * n;
+    wsum += w * w;
+  }
+  return smoothstep(-0.7, 0.55, acc / sqrt(max(wsum, 1e-4)));
+}
+
+vec4 shadeDisk(vec2 hp, float g, float delay, vec2 slope, bool upward, vec2 fp, float gsky, bool primary) {
+  float a = u_bh.x, rin = u_bh.z, rout = u_bh.w;
+  float r = sqrt(max(dot(hp, hp) - a * a, rin * rin));
+  float flux = diskFlux(r);
+  float s15 = 1.0 / (r * sqrt(r));
+  float ggrav = gsky * sqrt(max(1e-6, 1.0 - 3.0 / r + 2.0 * a * s15)) / (1.0 + a * s15);
+  float gcol = mix(ggrav, g, u_disk.y);
+  float gint = mix(ggrav, g, u_disk.z);
+  float Tobs = u_disk.x * pow(max(flux, 1e-8), 0.25) * gcol;       // T_obs = g · T_emit
+  float gi2 = gint * gint;
+  vec3 rad = blackbody(Tobs) * (flux * gi2 * gi2 * u_disk.w);      // bolometric radiance ∝ g⁴ F(r)
+  float edge = smoothstep(rin, rin * 1.3 + 0.3, r) * (1.0 - smoothstep(rout * 0.7, rout, r));
+  float tau0 = u_disk2.y * edge;
+  float pathf = min(sqrt(1.0 + dot(slope, slope)), 5.0);
+  float sl = length(slope);
+  vec2 par = slope * min(1.0, 2.5 / max(sl, 1e-4));
+  float H = u_disk2.z * r;
+  int nl = primary ? int(u_shadeB.y) : 1;
+  float t = u_shadeA.z - delay * u_shadeB.w;
+  int octaves = int(u_shadeB.z);
+  vec3 em = vec3(0.0);
+  float trans = 1.0;
+  for (int k = 0; k < nl; k++) {
+    float zeta = ((float(k) + 0.5) / float(nl) * 2.0 - 1.0) * 0.85;
+    if (!upward) zeta = -zeta;
+    float dens = diskDensity(hp + par * (zeta * H), zeta * H, t, fp, octaves);
+    float alpha = 1.0 - exp(-tau0 * pathf * dens * 2.2 / float(nl));
+    em += trans * alpha * rad * (0.3 + 1.25 * dens);
+    trans *= 1.0 - alpha;
+  }
+  return vec4(em, 1.0 - trans);
+}
+
+vec3 skyDiffuse(vec3 dir, vec3 dx, vec3 dy) {
+  float lx = length(dx), ly = length(dy);
+  vec3 major = dx;
+  float lmaj = lx, lmin = ly;
+  if (ly > lx) { major = dy; lmaj = ly; lmin = lx; }
+  float taps = clamp(ceil(lmaj / max(lmin, 1e-6)), 1.0, 6.0);
+  float lod = clamp(log2(max(lmin, lmaj / taps) / u_sky.y), 0.0, u_sky.z);
+  vec3 c = vec3(0.0);
+  int nt = int(taps);
+  for (int i = 0; i < nt; i++) {
+    float t = (float(i) + 0.5) / taps - 0.5;
+    c += textureLod(uSkyTex, dir + major * t, lod).rgb;
+  }
+  return c / taps;
+}
+
+uint pcg(uint v) {
+  uint s = v * 747796405u + 2891336453u;
+  uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+  return (w >> 22u) ^ w;
+}
+float u01(uint h) { return float(h >> 8u) * (1.0 / 16777216.0); }
+
+// Point-source stars located through the inverse pixel footprint (see WGSL).
+vec3 starLayer(vec3 dir, vec3 dx, vec3 dy, float N, float prob, float fluxMin, float fluxMax, uint seed) {
+  float g11 = dot(dx, dx), g22 = dot(dy, dy), g12 = dot(dx, dy);
+  float det0 = g11 * g22 - g12 * g12;
+  float det = max(det0, 0.1 * g11 * g22 + 1e-30);
+  float caustic = smoothstep(0.02, 0.12, det0 / (g11 * g22 + 1e-30));   // fade on caustics
+  ivec3 base = ivec3(floor(dir * N - vec3(0.5)));
+  vec3 acc = vec3(0.0);
+  for (int k = 0; k < 8; k++) {
+    ivec3 cell = base + ivec3(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+    uint h0 = pcg(uint(cell.x) + pcg(uint(cell.y) + pcg(uint(cell.z) + seed)));
+    uint h1 = pcg(h0);
+    uint h2 = pcg(h1);
+    vec3 sp = vec3(cell) + vec3(u01(h0), u01(h1), u01(h2));
+    float sl = length(sp);
+    if (abs(sl - N) > 0.5) continue;
+    vec3 dv = sp / sl - dir;
+    float b1 = dot(dv, dx), b2 = dot(dv, dy);
+    float pu = (g22 * b1 - g12 * b2) / det;
+    float pv = (g11 * b2 - g12 * b1) / det;
+    float e = (pu * pu + pv * pv) * 1.3889;
+    if (e > 12.0) continue;
+    uint h3 = pcg(h2);
+    if (u01(h3) > prob) continue;
+    uint h4 = pcg(h3);
+    uint h5 = pcg(h4);
+    uint h6 = pcg(h5);
+    float flux = min(fluxMin * pow(max(u01(h4), 1e-6), -0.8), fluxMax);
+    float T = 3000.0 + 4200.0 * pow(u01(h5), 1.6);
+    float hot = u01(h6);
+    if (hot > 0.86) T = 7500.0 + 22000.0 * pow((hot - 0.86) / 0.14, 2.0);
+    acc += blackbody(T) * (flux * exp(-e));
+  }
+  return acc * (caustic / sqrt(det));
+}
+
+vec3 skyRadiance(vec3 dir, vec3 dx, vec3 dy, ivec2 dims) {
+  vec3 c = skyDiffuse(dir, dx, dy);
+  float floorLen = 2.0 * u_camPos.w / float(dims.y) * 0.224;
+  float lx = length(dx), ly = length(dy);
+  vec3 sx = dx, sy = dy;
+  if (lx < floorLen) sx = (lx < 1e-12 ? normalize(cross(dir, vec3(0.31, 0.52, 0.80))) : dx / lx) * floorLen;
+  if (ly < floorLen) sy = (ly < 1e-12 ? normalize(cross(dir, vec3(0.74, -0.33, 0.58))) : dy / ly) * floorLen;
+  c += (starLayer(dir, sx, sy, 14.0, 0.30, 0.55, 40.0, 11u)
+      + starLayer(dir, sx, sy, 40.0, 0.35, 0.07, 4.0, 23u)
+      + starLayer(dir, sx, sy, 90.0, 0.30, 0.012, 0.6, 37u)
+      + starLayer(dir, sx, sy, 150.0, 0.30, 0.004, 0.15, 59u)) * 3.98e-8;
+  return c;
+}
+
+vec3 skyDelta(ivec2 p, vec3 dir) {
+  uvec4 w = texelFetch(uC0, p, 0);
+  uint fate = uint(unpackHalf2x16(w.w).y + 0.5) & 1u;
+  if (fate == 0u) return vec3(0.3, 0.0, 0.0);
+  return vec3(uintBitsToFloat(w.x), uintBitsToFloat(w.y), uintBitsToFloat(w.z)) - dir;
+}
+
+void main() {
+  ivec2 dims = ivec2(u_shadeA.xy);
+  ivec2 pix = ivec2(gl_FragCoord.xy);
+  uvec4 w0 = texelFetch(uC0, pix, 0);
+  vec3 dir = vec3(uintBitsToFloat(w0.x), uintBitsToFloat(w0.y), uintBitsToFloat(w0.z));
+  vec2 meta = unpackHalf2x16(w0.w);
+  uint code = uint(meta.y + 0.5);
+  float gsky = meta.x;
+  uint fate = code & 1u;
+  int nhit = int((code >> 1u) & 3u);
+  uint signs = (code >> 3u) & 7u;
+
+  ivec2 pXp = ivec2(min(pix.x + 1, dims.x - 1), pix.y), pXm = ivec2(max(pix.x - 1, 0), pix.y);
+  ivec2 pYp = ivec2(pix.x, min(pix.y + 1, dims.y - 1)), pYm = ivec2(pix.x, max(pix.y - 1, 0));
+
+  vec3 col = vec3(0.0);
+  float trans = 1.0;
+  for (int k = 0; k < nhit; k++) {
+    uvec4 h = hitRec(pix, k);
+    vec2 hp = vec2(uintBitsToFloat(h.x), uintBitsToFloat(h.y));
+    vec2 gd = unpackHalf2x16(h.z);
+    vec2 sl = unpackHalf2x16(h.w);
+    vec2 ex = hitXY(pXp, k) - hp, ex2 = hitXY(pXm, k) - hp;
+    if (pXp.x == pix.x || (pXm.x != pix.x && dot(ex2, ex2) < dot(ex, ex))) ex = ex2;
+    vec2 ey = hitXY(pYp, k) - hp, ey2 = hitXY(pYm, k) - hp;
+    if (pYp.y == pix.y || (pYm.y != pix.y && dot(ey2, ey2) < dot(ey, ey))) ey = ey2;
+    vec2 rhat = normalize(hp);
+    vec2 that = vec2(-rhat.y, rhat.x);
+    vec2 fp = min(vec2(max(abs(dot(ex, rhat)), abs(dot(ey, rhat))), max(abs(dot(ex, that)), abs(dot(ey, that)))), vec2(4.0));
+    vec4 d = shadeDisk(hp, gd.x, gd.y, sl, ((signs >> uint(k)) & 1u) == 1u, fp, gsky, k == 0);
+    col += trans * d.rgb;
+    trans *= 1.0 - d.a;
+    if (trans < 0.004) break;
+  }
+  if (fate == 1u && trans >= 0.004) {
+    vec3 dx = skyDelta(pXp, dir), dx2 = skyDelta(pXm, dir);
+    if (pXp.x == pix.x || (pXm.x != pix.x && dot(dx2, dx2) < dot(dx, dx))) dx = dx2;
+    vec3 dy = skyDelta(pYp, dir), dy2 = skyDelta(pYm, dir);
+    if (pYp.y == pix.y || (pYm.y != pix.y && dot(dy2, dy2) < dot(dy, dy))) dy = dy2;
+    float g2 = gsky * gsky;
+    col += trans * skyRadiance(dir, dx, dy, dims) * (u_sky.x * g2 * g2);
+  }
+  fragColor = vec4(max(col, vec3(0.0)), 1.0);
+}
+`;
+
+const GLSL_POST = /* glsl */ `
+// POST-PROCESSING, GLSL port: bloom chain and output transform (SDR, AgX).
+uniform sampler2D uTexA;
+uniform sampler2D uTexB;
+uniform vec2 uUVScale;            // used part of uTexA (the scene may occupy a sub-rectangle)
+uniform mat3 uOutMat;             // Display-P3 → output primaries
+in vec2 vUV;
+out vec4 fragColor;
+
+#ifdef PASS_DOWN
+vec3 tap(vec2 uv, vec2 hi) { return textureLod(uTexA, min(uv, hi), 0.0).rgb; }
+void main() {
+  vec2 ts = 1.0 / vec2(textureSize(uTexA, 0));
+  vec2 uv = vUV * uUVScale;
+  vec2 hi = uUVScale - 0.5 * ts;
+  vec3 e = tap(uv, hi);
+  vec3 a = tap(uv + ts * vec2(-2.0, -2.0), hi), b = tap(uv + ts * vec2(0.0, -2.0), hi), c = tap(uv + ts * vec2(2.0, -2.0), hi);
+  vec3 d = tap(uv + ts * vec2(-2.0, 0.0), hi), f = tap(uv + ts * vec2(2.0, 0.0), hi);
+  vec3 g = tap(uv + ts * vec2(-2.0, 2.0), hi), h = tap(uv + ts * vec2(0.0, 2.0), hi), i = tap(uv + ts * vec2(2.0, 2.0), hi);
+  vec3 j = tap(uv + ts * vec2(-1.0, -1.0), hi), k = tap(uv + ts * vec2(1.0, -1.0), hi);
+  vec3 l = tap(uv + ts * vec2(-1.0, 1.0), hi), m = tap(uv + ts * vec2(1.0, 1.0), hi);
+  fragColor = vec4(e * 0.125 + (a + c + g + i) * 0.03125 + (b + d + f + h) * 0.0625 + (j + k + l + m) * 0.125, 1.0);
+}
+#endif
+
+#ifdef PASS_UP
+void main() {
+  vec2 ts = 1.0 / vec2(textureSize(uTexA, 0));
+  vec3 c = textureLod(uTexA, vUV, 0.0).rgb * 4.0;
+  c += (textureLod(uTexA, vUV + ts * vec2(-1.0, 0.0), 0.0).rgb + textureLod(uTexA, vUV + ts * vec2(1.0, 0.0), 0.0).rgb
+      + textureLod(uTexA, vUV + ts * vec2(0.0, -1.0), 0.0).rgb + textureLod(uTexA, vUV + ts * vec2(0.0, 1.0), 0.0).rgb) * 2.0;
+  c += textureLod(uTexA, vUV + ts * vec2(-1.0, -1.0), 0.0).rgb + textureLod(uTexA, vUV + ts * vec2(1.0, -1.0), 0.0).rgb
+     + textureLod(uTexA, vUV + ts * vec2(-1.0, 1.0), 0.0).rgb + textureLod(uTexA, vUV + ts * vec2(1.0, 1.0), 0.0).rgb;
+  fragColor = vec4(c / 16.0, 1.0);
+}
+#endif
+
+#ifdef PASS_COMPOSITE
+vec3 agxContrast(vec3 x) {
+  vec3 x2 = x * x, x4 = x2 * x2;
+  return 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232;
+}
+vec3 agx(vec3 c) {
+  const mat3 inset = mat3(0.842479062253094, 0.0423282422610123, 0.0423756549057051,
+                          0.0784335999999992, 0.878468636469772, 0.0784336,
+                          0.0792237451477643, 0.0791661274605434, 0.879142973793104);
+  const mat3 outset = mat3(1.19687900512017, -0.0528968517574562, -0.0529716355144438,
+                           -0.0980208811401368, 1.15190312990417, -0.0980434501171241,
+                           -0.0989611768448433, -0.0989417417135567, 1.15107367264116);
+  const float minEv = -12.47393, maxEv = 4.026069;
+  vec3 v = inset * max(c, vec3(0.0));
+  v = clamp(log2(max(v, vec3(1e-10))), vec3(minEv), vec3(maxEv));
+  v = agxContrast((v - minEv) / (maxEv - minEv));
+  float luma = dot(v, vec3(0.2126, 0.7152, 0.0722));
+  v = pow(max(v, vec3(0.0)), vec3(1.35));
+  v = luma + 1.4 * (v - luma);
+  v = outset * v;
+  return pow(clamp(v, vec3(0.0), vec3(1.0)), vec3(2.2));
+}
+vec3 oetf(vec3 c) {
+  vec3 a = clamp(c, vec3(0.0), vec3(1.0));
+  return mix(1.055 * pow(a, vec3(1.0 / 2.4)) - 0.055, a * 12.92, lessThanEqual(a, vec3(0.0031308)));
+}
+float hash12(vec2 p, float s) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031 + s * 0.071);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+void main() {
+  vec2 ts = 1.0 / vec2(textureSize(uTexA, 0));
+  vec3 c = textureLod(uTexA, min(vUV * uUVScale, uUVScale - 0.5 * ts), 0.0).rgb;
+  vec3 bloom = textureLod(uTexB, vUV, 0.0).rgb;
+  c = mix(c, bloom, u_post.y);
+  vec2 d = (vUV - vec2(0.5)) * vec2(u_post2.y / u_post2.z, 1.0);
+  float v = 1.0 / (1.0 + u_post2.x * dot(d, d));
+  c *= u_post.x * v * v;
+  vec3 e = oetf(uOutMat * agx(c));
+  float n = hash12(gl_FragCoord.xy, fract(u_shadeA.w * 0.0173) * 61.0) + hash12(gl_FragCoord.yx + 17.0, fract(u_shadeA.w * 0.0291) * 47.0) - 1.0;
+  float l = clamp(dot(e, vec3(0.3, 0.6, 0.1)), 0.0, 1.0);
+  e += n * u_post.w * (0.25 + 0.75 * sqrt(l) * (1.0 - 0.6 * l));
+  fragColor = vec4(e, 1.0);
+}
+#endif
+`;
+
+const GLSL_SKY = /* glsl */ `
+// SKY GENERATOR, GLSL port: renders the procedural celestial sphere into one cubemap face.
+uniform vec4 uFace;               // x: face index, y: face size (texels), z: star sigma (radians)
+uniform sampler2D uLut;
+uniform highp sampler3D uNoise;
+out vec4 fragColor;
+
+uint pcg(uint v) {
+  uint s = v * 747796405u + 2891336453u;
+  uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+  return (w >> 22u) ^ w;
+}
+float u01(uint h) { return float(h >> 8u) * (1.0 / 16777216.0); }
+
+// Blackbody chromaticity (same table as the disk).  T range 500 K … 40000 K.
+vec3 blackbody(float T) {
+  float t = clamp(log(T / 500.0) / log(80.0), 0.0, 1.0);
+  return textureLod(uLut, vec2((t * 511.0 + 0.5) / 512.0, 0.25), 0.0).rgb;
+}
+
+float fbm(vec3 p, int octaves) {
+  float s = 0.0;
+  float amp = 0.5;
+  vec3 q = p / 16.0;
+  for (int i = 0; i < octaves; i++) {
+    s += amp * (textureLod(uNoise, q, 0.0).r - 0.5) * 2.0;
+    q = q.yzx * 2.03 + vec3(0.31, 0.57, 0.13);
+    amp *= 0.5;
+  }
+  return s;
+}
+
+// Galactic frame: band normal ng, centre direction gc.
+const vec3 NG = vec3(0.0, 0.5, 0.8660254);
+const vec3 GC = vec3(-0.7071068, -0.6123724, 0.3535534);
+
+vec2 bandProfile(vec3 d) {
+  float sb = dot(d, NG);                                    // sin(galactic latitude)
+  float cl = dot(normalize(d - sb * NG), GC);               // cos(longitude from the centre)
+  float width = 0.11 + 0.09 * smoothstep(-0.2, 1.0, cl);    // thicker toward the bulge
+  return vec2(sb / width, cl);
+}
+
+// One layer of stars.  Space is cut into unit cells of a lattice scaled by N; a
+// cell may hold one star, kept only if it lies in the thin shell |x| ≈ N so the
+// surface density is uniform and seamless across cube faces.
+vec3 starLayer(vec3 d, float N, float prob, float peakMin, float peakMax, float sigma, uint seed, float band) {
+  vec3 p = d * N;
+  ivec3 base = ivec3(floor(p - vec3(0.5)));
+  vec3 acc = vec3(0.0);
+  float inv = 0.5 / (sigma * sigma);
+  for (int k = 0; k < 8; k++) {
+    ivec3 cell = base + ivec3(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+    uint h0 = pcg(uint(cell.x) + pcg(uint(cell.y) + pcg(uint(cell.z) + seed)));
+    uint h1 = pcg(h0);
+    uint h2 = pcg(h1);
+    uint h3 = pcg(h2);
+    uint h4 = pcg(h3);
+    uint h5 = pcg(h4);
+    uint h6 = pcg(h5);
+    vec3 sp = vec3(cell) + vec3(u01(h0), u01(h1), u01(h2));
+    float sl = length(sp);
+    if (abs(sl - N) > 0.5) continue;
+    vec3 sd = sp / sl;
+    vec3 dv = sd - d;
+    float e = dot(dv, dv) * inv;
+    if (e > 14.0) continue;
+    // band = 1: stars only in the galactic plane (star clouds).
+    vec2 bp = bandProfile(sd);
+    float dens = mix(1.0, 2.4 * exp(-bp.x * bp.x * 0.9), band);
+    if (u01(h3) > prob * dens) continue;
+    // Cumulative counts N(>F) ∝ F^-1.25 (d log N / dm ≈ 0.5, as in the real sky).
+    float peak = min(peakMin * pow(max(u01(h4), 1e-6), -0.8), peakMax);
+    // Effective temperatures: mostly K–F dwarfs and giants, a tail of hot O/B/A stars.
+    float T = 3000.0 + 4200.0 * pow(u01(h5), 1.6);
+    float hot = u01(h6);
+    if (hot > 0.86) { T = 7500.0 + 22000.0 * pow((hot - 0.86) / 0.14, 2.0); }
+    acc += blackbody(T) * (peak * exp(-e));
+  }
+  // Peaks are quoted for a 2048² cubemap; (σ_ref/σ)² keeps each star's flux resolution-independent.
+  float sref = 5.371e-4 / sigma;
+  return acc * (sref * sref);
+}
+
+vec3 milkyWay(vec3 d) {
+  vec2 bp = bandProfile(d);
+  float warp = fbm(d * 2.3 + vec3(3.1, 1.7, 0.4), 4);
+  float b = bp.x + 0.55 * warp;
+  float lon = 0.35 + 0.65 * smoothstep(-1.0, 1.0, bp.y);
+  float bulge = exp(-(1.0 - bp.y) * 9.0 - bp.x * bp.x * 0.35);
+  float glow = exp(-b * b) * lon * (0.75 + 0.9 * fbm(d * 6.0, 5)) + 1.3 * bulge;
+  glow = max(glow, 0.0);
+  // Dust lanes hug the mid-plane: they absorb and redden.
+  float dn = fbm(d * 7.5 + vec3(warp * 1.5), 5);
+  float dust = smoothstep(-0.05, 0.4, dn + 0.25 * fbm(d * 19.0, 3)) * exp(-b * b * 3.5);
+  vec3 starlight = mix(blackbody(4800.0), blackbody(8500.0), clamp(0.5 + 1.2 * fbm(d * 3.7 + vec3(9.0), 3), 0.0, 1.0));
+  vec3 c = starlight * glow * exp(-vec3(1.6, 2.3, 3.2) * dust);
+  // Faint emission nebulae (Hα) along the plane and a touch of blue reflection.
+  float ha = pow(max(fbm(d * 11.0 + vec3(5.5), 4) - 0.18, 0.0), 2.0) * exp(-b * b * 2.0);
+  float refl = pow(max(fbm(d * 8.0 + vec3(-4.0, 2.0, 7.0), 4) - 0.22, 0.0), 2.0) * exp(-b * b * 1.2);
+  c += vec3(1.0, 0.22, 0.30) * ha * 2.2 + vec3(0.35, 0.55, 1.0) * refl * 1.2;
+  // Very faint isotropic background (unresolved stars / zodiacal floor).
+  return c * 0.024 + blackbody(5200.0) * 0.0004;
+}
+
+void main() {
+  vec2 st = gl_FragCoord.xy / uFace.y * 2.0 - 1.0;
+  int f = int(uFace.x + 0.5);
+  vec3 d;
+  // Standard cubemap face orientation (+X, −X, +Y, −Y, +Z, −Z).
+  if (f == 0) d = vec3(1.0, -st.y, -st.x);
+  else if (f == 1) d = vec3(-1.0, -st.y, st.x);
+  else if (f == 2) d = vec3(st.x, 1.0, st.y);
+  else if (f == 3) d = vec3(st.x, -1.0, -st.y);
+  else if (f == 4) d = vec3(st.x, -st.y, 1.0);
+  else d = vec3(-st.x, -st.y, -1.0);
+  d = normalize(d);
+  vec3 c = milkyWay(d);
+  c += starLayer(d, 150.0, 0.30, 0.012, 0.16, uFace.z, 53u, 1.0);   // ≈ 60 k unresolved stars confined to the galactic band
+  fragColor = vec4(c, 1.0);
+}
+`;
+
+/* ════════════════════════════════════════════════════════════════════════════
+   4. WEBGPU RENDERER
+   Frame graph:
+     [trace  (compute)]   geodesics → ray cache          only when the camera/spin changed
+     [static (render) ]   time-independent shading of the freshly traced band → S0, running mean S̄, sky cache
+     shade               ray cache → animated HDR frame  every frame
+     resolve             upsample + temporal accumulation
+     bloom               multi-scale glare
+     composite           exposure, tone curve (HDR shoulder | AgX), grain → canvas
+   ════════════════════════════════════════════════════════════════════════════ */
+const BLOOM_LEVELS = 6;
+const UNIFORM_FLOATS = 19 * 4;
+
+class WebGPURenderer {
+  static async create(canvas) {
+    if (!navigator.gpu) throw new Error('navigator.gpu is not available');
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+    if (!adapter) throw new Error('no WebGPU adapter');
+    // The full-resolution ray cache is 64 bytes per pixel: ask for large storage buffers.
+    const GiB = 1073741824;
+    const requiredLimits = {
+      maxStorageBufferBindingSize: Math.min(adapter.limits.maxStorageBufferBindingSize, GiB),
+      maxBufferSize: Math.min(adapter.limits.maxBufferSize, GiB),
+    };
+    const device = await adapter.requestDevice({ requiredLimits });
+    const context = canvas.getContext('webgpu');
+    if (!context) throw new Error('no webgpu canvas context');
+    const r = new WebGPURenderer(canvas, device, context);
+    await r.init();
+    return r;
+  }
+
+  constructor(canvas, device, context) {
+    this.kind = 'webgpu';
+    this.label = 'WebGPU';
+    this.supportsSupersample = true;
+    this.canvas = canvas;
+    this.device = device;
+    this.context = context;
+    this.hdr = false;
+    this.maxCachePixels = Math.floor(Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize) / 64);
+    this.maxTextureSize = device.limits.maxTextureDimension2D;
+    this.histIndex = 0;
+    this.onError = null;
+    device.addEventListener('uncapturederror', (e) => { console.error('WebGPU error:', e.error.message); if (this.onError) this.onError(e.error.message); });
+    device.lost.then((info) => { if (this.onError) this.onError('GPU device lost: ' + info.message); });
+  }
+
+  /** Configure the canvas: rgba16float + Display-P3; "extended" tone mapping lets values above 1.0
+      exceed SDR white on an HDR display.  Falls back step by step on browsers that lack
+      canvas tone-mapping control or float canvases.  Returns whether HDR output is active. */
+  setHDR(on) {
+    const base = { device: this.device, format: this.canvasFormat, colorSpace: 'display-p3', alphaMode: 'opaque' };
+    this.hdr = false;
+    if (this.canvasFormat === 'rgba16float') {
+      try {
+        this.context.configure({ ...base, toneMapping: { mode: on ? 'extended' : 'standard' } });
+        const got = this.context.getConfiguration ? this.context.getConfiguration() : null;
+        this.hdr = on && (!got || !got.toneMapping || got.toneMapping.mode === 'extended');
+        return this.hdr;
+      } catch (e) { /* no toneMapping member: configure without it below */ }
+    }
+    this.context.configure(base);
+    return this.hdr;
+  }
+
+  /** rgba16float if the canvas accepts it, otherwise the preferred 8-bit format (SDR only). */
+  pickCanvasFormat() {
+    try {
+      this.context.configure({ device: this.device, format: 'rgba16float', colorSpace: 'display-p3', alphaMode: 'opaque' });
+      return 'rgba16float';
+    } catch (e) {
+      return navigator.gpu.getPreferredCanvasFormat();
+    }
+  }
+
+  async init() {
+    const d = this.device;
+    this.canvasFormat = this.pickCanvasFormat();
+    const F = GPUShaderStage.FRAGMENT, C = GPUShaderStage.COMPUTE;
+    const tex = (binding, viewDimension = '2d') => ({ binding, visibility: F, texture: { sampleType: 'float', viewDimension } });
+    const smp = (binding) => ({ binding, visibility: F, sampler: { type: 'filtering' } });
+    const ubo = (binding, visibility) => ({ binding, visibility, buffer: { type: 'uniform' } });
+
+    this.layouts = {
+      trace: d.createBindGroupLayout({ entries: [ubo(0, C), { binding: 1, visibility: C, buffer: { type: 'storage' } }] }),
+      shade: d.createBindGroupLayout({ entries: [ubo(0, F), { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } },
+        tex(2), smp(3), tex(4, '3d'), smp(5), tex(6, 'cube'), tex(7), tex(8), tex(9)] }),
+      stat: d.createBindGroupLayout({ entries: [ubo(0, F), { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } },
+        tex(2), smp(3), tex(4, '3d'), smp(5), tex(6, 'cube')] }),
+      post: d.createBindGroupLayout({ entries: [ubo(0, F), tex(1), tex(2), smp(3)] }),
+      sky: d.createBindGroupLayout({ entries: [ubo(0, F), tex(1), smp(2), tex(3, '3d'), smp(4)] }),
+    };
+    const pl = (l) => d.createPipelineLayout({ bindGroupLayouts: [l] });
+    const module = async (name, code) => {
+      const m = d.createShaderModule({ label: name, code });
+      const info = await m.getCompilationInfo();
+      for (const msg of info.messages) if (msg.type === 'error') throw new Error(`${name} shader: ${msg.message} (line ${msg.lineNum})`);
+      return m;
+    };
+    const mTrace = await module('trace', WGSL_COMMON + WGSL_TRACE);
+    const mShade = await module('shade', WGSL_COMMON + WGSL_SHADE);
+    const mPost = await module('post', WGSL_COMMON + WGSL_POST);
+    const mSky = await module('sky', WGSL_SKY);
+
+    const HDRF = 'rgba16float';
+    const constBlend = { color: { srcFactor: 'constant', dstFactor: 'one-minus-constant', operation: 'add' },
+                         alpha: { srcFactor: 'constant', dstFactor: 'one-minus-constant', operation: 'add' } };
+    const rp = (layout, mod, entry, targets) => d.createRenderPipeline({
+      layout: pl(layout), vertex: { module: mod, entryPoint: 'vs' },
+      fragment: { module: mod, entryPoint: entry, targets }, primitive: { topology: 'triangle-list' } });
+
+    this.pipes = {
+      trace: d.createComputePipeline({ layout: pl(this.layouts.trace), compute: { module: mTrace, entryPoint: 'main' } }),
+      shade: rp(this.layouts.shade, mShade, 'fsAnimated', [{ format: HDRF }]),
+      stat: rp(this.layouts.stat, mShade, 'fsStatic', [{ format: HDRF }, { format: HDRF, blend: constBlend }, { format: HDRF }]),
+      resolve: rp(this.layouts.post, mPost, 'fsResolve', [{ format: HDRF }]),
+      down: rp(this.layouts.post, mPost, 'fsDown', [{ format: HDRF }]),
+      up: rp(this.layouts.post, mPost, 'fsUp', [{ format: HDRF, blend: constBlend }]),
+      blit: rp(this.layouts.post, mPost, 'fsBlit', [{ format: HDRF }]),
+      composite: rp(this.layouts.post, mPost, 'fsComposite', [{ format: this.canvasFormat }]),
+      sky: rp(this.layouts.sky, mSky, 'fs', [{ format: HDRF }]),
+    };
+
+    this.ubuf = d.createBuffer({ size: UNIFORM_FLOATS * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.linClamp = d.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear',
+      addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge', addressModeW: 'clamp-to-edge' });
+    this.linRepeat = d.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'repeat', addressModeV: 'repeat', addressModeW: 'repeat' });
+    this.dummy = d.createTexture({ size: [1, 1], format: HDRF, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT }).createView();
+    this.lutTex = d.createTexture({ size: [Tables.LUT_N, 2], format: HDRF, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+    this.lutView = this.lutTex.createView();
+  }
+
+  /** Upload the blackbody / flux table (Float32 RGBA, LUT_N × 2). */
+  updateLUT(data) {
+    this.device.queue.writeTexture({ texture: this.lutTex }, Tables.toHalfArray(data), { bytesPerRow: Tables.LUT_N * 8 }, [Tables.LUT_N, 2]);
+  }
+
+  /** Upload the tileable 3D noise volume (r8unorm, size³). */
+  setNoise(data, size) {
+    const t = this.device.createTexture({ size: [size, size, size], dimension: '3d', format: 'r8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+    this.device.queue.writeTexture({ texture: t }, data, { bytesPerRow: size, rowsPerImage: size }, [size, size, size]);
+    this.noiseView = t.createView();
+  }
+
+  /** Render the procedural sky into a mip-mapped cubemap (once; again only if the size changes). */
+  buildSky(size) {
+    const d = this.device;
+    if (this.skyTex) this.skyTex.destroy();
+    const mips = Math.floor(Math.log2(size)) + 1;
+    this.skyTex = d.createTexture({ size: [size, size, 6], format: 'rgba16float', mipLevelCount: mips,
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT });
+    this.skySize = size;
+    this.skyMaxLod = mips - 1;
+    const faceView = (face, level) => this.skyTex.createView({ dimension: '2d', baseArrayLayer: face, arrayLayerCount: 1, baseMipLevel: level, mipLevelCount: 1 });
+    const sigma = 0.55 * 2 / size;                      // star PSF: ~half a texel (radians at face centre)
+    for (let face = 0; face < 6; face++) {
+      const ub = d.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+      d.queue.writeBuffer(ub, 0, new Float32Array([face, size, sigma, 0]));
+      const bg = d.createBindGroup({ layout: this.layouts.sky, entries: [
+        { binding: 0, resource: { buffer: ub } }, { binding: 1, resource: this.lutView }, { binding: 2, resource: this.linClamp },
+        { binding: 3, resource: this.noiseView }, { binding: 4, resource: this.linRepeat }] });
+      const enc = d.createCommandEncoder();
+      const pass = enc.beginRenderPass({ colorAttachments: [{ view: faceView(face, 0), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }] });
+      pass.setPipeline(this.pipes.sky); pass.setBindGroup(0, bg); pass.draw(3); pass.end();
+      // Mip chain: successive 2×2 box filters conserve the flux of every star, so
+      // minified (demagnified) sky regions dim smoothly instead of shimmering.
+      for (let level = 1; level < mips; level++) {
+        const bgm = d.createBindGroup({ layout: this.layouts.post, entries: [
+          { binding: 0, resource: { buffer: this.ubuf } }, { binding: 1, resource: faceView(face, level - 1) },
+          { binding: 2, resource: this.dummy }, { binding: 3, resource: this.linClamp }] });
+        const p = enc.beginRenderPass({ colorAttachments: [{ view: faceView(face, level), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }] });
+        p.setPipeline(this.pipes.blit); p.setBindGroup(0, bgm); p.draw(3); p.end();
+      }
+      d.queue.submit([enc.finish()]);
+    }
+    this.skyView = this.skyTex.createView({ dimension: 'cube' });
+    if (this.fullW) this.makeBindGroups();
+  }
+
+  /** (Re)allocate the ray caches and render targets. */
+  resize(fullW, fullH, lowW, lowH) {
+    const d = this.device;
+    for (const t of this.owned || []) t.destroy();
+    this.owned = [];
+    const own = (t) => { this.owned.push(t); return t; };
+    this.fullW = fullW; this.fullH = fullH; this.lowW = lowW; this.lowH = lowH;
+    const RT = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT;
+    const target = (w, h) => own(d.createTexture({ size: [w, h], format: 'rgba16float', usage: RT })).createView();
+    this.cacheFull = own(d.createBuffer({ size: fullW * fullH * 64, usage: GPUBufferUsage.STORAGE }));
+    this.cacheLow = own(d.createBuffer({ size: lowW * lowH * 64, usage: GPUBufferUsage.STORAGE }));
+    this.s0 = target(fullW, fullH);
+    this.sbar = target(fullW, fullH);
+    this.skyCache = target(fullW, fullH);
+    this.scene = target(fullW, fullH);
+    this.hist = [target(fullW, fullH), target(fullW, fullH)];
+    this.bloom = [];
+    for (let i = 1; i <= BLOOM_LEVELS; i++) this.bloom.push(target(Math.max(1, fullW >> i), Math.max(1, fullH >> i)));
+    this.makeBindGroups();
+  }
+
+  makeBindGroups() {
+    if (!this.skyView || !this.noiseView || !this.cacheFull) return;
+    const d = this.device, U = { binding: 0, resource: { buffer: this.ubuf } };
+    const common = (cache) => [U, { binding: 1, resource: { buffer: cache } },
+      { binding: 2, resource: this.lutView }, { binding: 3, resource: this.linClamp },
+      { binding: 4, resource: this.noiseView }, { binding: 5, resource: this.linRepeat }, { binding: 6, resource: this.skyView }];
+    const post = (a, b) => d.createBindGroup({ layout: this.layouts.post, entries: [U, { binding: 1, resource: a }, { binding: 2, resource: b || this.dummy }, { binding: 3, resource: this.linClamp }] });
+    const shade = (cache) => d.createBindGroup({ layout: this.layouts.shade, entries: [...common(cache), { binding: 7, resource: this.s0 }, { binding: 8, resource: this.sbar }, { binding: 9, resource: this.skyCache }] });
+    this.bg = {
+      trace: { full: d.createBindGroup({ layout: this.layouts.trace, entries: [U, { binding: 1, resource: { buffer: this.cacheFull } }] }),
+               low: d.createBindGroup({ layout: this.layouts.trace, entries: [U, { binding: 1, resource: { buffer: this.cacheLow } }] }) },
+      shade: { full: shade(this.cacheFull), low: shade(this.cacheLow) },
+      stat: d.createBindGroup({ layout: this.layouts.stat, entries: common(this.cacheFull) }),
+      resolve: [post(this.scene, this.hist[1]), post(this.scene, this.hist[0])],          // [i] writes hist[i], reads hist[1−i]
+      down: [post(this.hist[0]), post(this.hist[1]), ...this.bloom.slice(0, -1).map((v) => post(v))],
+      up: this.bloom.slice(1).map((v) => post(v)),
+      composite: [post(this.hist[0], this.bloom[0]), post(this.hist[1], this.bloom[0])],
+    };
+  }
+
+  /** Encode and submit one frame.
+      frame = { u: Float32Array, trace: null | { cache, w, h, y0, y1, staticWeight }, shadeSrc, shadeW, shadeH } */
+  render(frame) {
+    const d = this.device;
+    if (!this.bg) return;
+    d.queue.writeBuffer(this.ubuf, 0, frame.u);
+    const enc = d.createCommandEncoder();
+    const draw = (view, pipe, bg, opts = {}) => {
+      const pass = enc.beginRenderPass({ colorAttachments: [{ view, loadOp: opts.load ? 'load' : 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }] });
+      pass.setPipeline(pipe); pass.setBindGroup(0, bg);
+      if (opts.viewport) pass.setViewport(0, 0, opts.viewport[0], opts.viewport[1], 0, 1);
+      if (opts.blend !== undefined) pass.setBlendConstant([opts.blend, opts.blend, opts.blend, opts.blend]);
+      pass.draw(3); pass.end();
+    };
+
+    const t = frame.trace;
+    if (t) {
+      const pass = enc.beginComputePass();
+      pass.setPipeline(this.pipes.trace);
+      pass.setBindGroup(0, this.bg.trace[t.cache]);
+      pass.dispatchWorkgroups(Math.ceil(t.w / 8), Math.ceil((t.y1 - t.y0) / 8));
+      pass.end();
+      if (t.staticWeight > 0) {
+        const pass2 = enc.beginRenderPass({ colorAttachments: [
+          { view: this.s0, loadOp: 'load', storeOp: 'store' }, { view: this.sbar, loadOp: 'load', storeOp: 'store' },
+          { view: this.skyCache, loadOp: 'load', storeOp: 'store' }] });
+        pass2.setPipeline(this.pipes.stat); pass2.setBindGroup(0, this.bg.stat);
+        pass2.setScissorRect(0, t.y0, t.w, t.y1 - t.y0);
+        pass2.setBlendConstant([t.staticWeight, t.staticWeight, t.staticWeight, t.staticWeight]);
+        pass2.draw(3); pass2.end();
+      }
+    }
+
+    const hi = this.histIndex;
+    draw(this.scene, this.pipes.shade, this.bg.shade[frame.shadeSrc], { viewport: [frame.shadeW, frame.shadeH] });
+    draw(this.hist[hi], this.pipes.resolve, this.bg.resolve[hi]);
+
+    // Bloom: downsample chain, then upsample back with equal energy per octave:
+    // level i ← (level i + (N−i)·up(level i+1)) / (N−i+1), done with a blend constant.
+    const N = BLOOM_LEVELS;
+    for (let i = 0; i < N; i++) draw(this.bloom[i], this.pipes.down, i === 0 ? this.bg.down[hi] : this.bg.down[i + 1]);
+    for (let i = N - 2; i >= 0; i--) draw(this.bloom[i], this.pipes.up, this.bg.up[i], { load: true, blend: (N - 1 - i) / (N - i) });
+
+    draw(this.context.getCurrentTexture().createView(), this.pipes.composite, this.bg.composite[hi]);
+    d.queue.submit([enc.finish()]);
+    this.histIndex = 1 - hi;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   5. WEBGL2 FALLBACK RENDERER
+   Same physics and the same ray-cache scheduling, with a simplified frame graph:
+     trace (fragment shader → 4 × RGBA32UI targets) → shade → bloom → composite
+   SDR only (AgX), no supersampling accumulation and no temporal resolve.
+   ════════════════════════════════════════════════════════════════════════════ */
+class WebGL2Renderer {
+  static create(canvas) {
+    const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, depth: false, stencil: false, powerPreference: 'high-performance' });
+    if (!gl) throw new Error('WebGL2 is not available');
+    if (!gl.getExtension('EXT_color_buffer_float') && !gl.getExtension('EXT_color_buffer_half_float')) throw new Error('float render targets are not supported');
+    if (gl.getParameter(gl.MAX_DRAW_BUFFERS) < 4) throw new Error('four draw buffers are required');
+    return new WebGL2Renderer(canvas, gl);
+  }
+
+  constructor(canvas, gl) {
+    this.kind = 'webgl2';
+    this.label = 'WebGL2';
+    this.supportsSupersample = false;
+    this.canvas = canvas;
+    this.gl = gl;
+    this.hdr = false;
+    this.maxTextureSize = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), gl.getParameter(gl.MAX_CUBE_MAP_TEXTURE_SIZE));
+    this.maxCachePixels = this.maxTextureSize * this.maxTextureSize;
+    this.onError = null;
+    // Present in Display-P3 when the browser allows it; otherwise convert to sRGB in the shader.
+    this.outMat = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
+    if ('drawingBufferColorSpace' in gl) { try { gl.drawingBufferColorSpace = 'display-p3'; } catch (e) { /* keep sRGB */ } }
+    if (gl.drawingBufferColorSpace !== 'display-p3') {
+      const m = Tables.P3_TO_SRGB;                       // row-major → column-major
+      this.outMat = new Float32Array([m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]]);
+    }
+
+    const HEAD = '#version 300 es\nprecision highp float;\nprecision highp int;\n';
+    const VS = HEAD + 'out vec2 vUV;\nvoid main() {\n  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n  vUV = p;\n  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n}\n';
+    const program = (name, fragment, defines = '') => {
+      const compile = (type, src) => {
+        const s = gl.createShader(type);
+        gl.shaderSource(s, src); gl.compileShader(s);
+        if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(`${name} shader: ${gl.getShaderInfoLog(s)}`);
+        return s;
+      };
+      const p = gl.createProgram();
+      gl.attachShader(p, compile(gl.VERTEX_SHADER, VS));
+      gl.attachShader(p, compile(gl.FRAGMENT_SHADER, HEAD + defines + GLSL_COMMON + '\n' + fragment));
+      gl.linkProgram(p);
+      if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(`${name} program: ${gl.getProgramInfoLog(p)}`);
+      const uniforms = {};
+      const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+      for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(p, i); uniforms[info.name.replace('[0]', '')] = gl.getUniformLocation(p, info.name); }
+      return { p, u: uniforms };
+    };
+    this.prog = {
+      trace: program('trace', GLSL_TRACE),
+      shade: program('shade', GLSL_SHADE),
+      down: program('bloom-down', GLSL_POST, '#define PASS_DOWN\n'),
+      up: program('bloom-up', GLSL_POST, '#define PASS_UP\n'),
+      composite: program('composite', GLSL_POST, '#define PASS_COMPOSITE\n'),
+      sky: program('sky', GLSL_SKY),
+    };
+    this.vao = gl.createVertexArray();
+    gl.bindVertexArray(this.vao);
+    gl.disable(gl.DEPTH_TEST);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+
+    this.lutTex = this.texture(gl.TEXTURE_2D, gl.LINEAR, gl.CLAMP_TO_EDGE);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA16F, Tables.LUT_N, 2);
+    this.owned = [];
+  }
+
+  texture(target, filter, wrap) {
+    const gl = this.gl, t = gl.createTexture();
+    gl.bindTexture(target, t);
+    gl.texParameteri(target, gl.TEXTURE_MIN_FILTER, filter);
+    gl.texParameteri(target, gl.TEXTURE_MAG_FILTER, filter === gl.NEAREST ? gl.NEAREST : gl.LINEAR);
+    gl.texParameteri(target, gl.TEXTURE_WRAP_S, wrap);
+    gl.texParameteri(target, gl.TEXTURE_WRAP_T, wrap);
+    if (target === gl.TEXTURE_3D) gl.texParameteri(target, gl.TEXTURE_WRAP_R, wrap);
+    return t;
+  }
+
+  setHDR() { return false; }                              // WebGL canvases are SDR
+
+  updateLUT(data) {
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.lutTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Tables.LUT_N, 2, gl.RGBA, gl.FLOAT, data);
+  }
+
+  setNoise(data, size) {
+    const gl = this.gl;
+    this.noiseTex = this.texture(gl.TEXTURE_3D, gl.LINEAR, gl.REPEAT);
+    gl.texStorage3D(gl.TEXTURE_3D, 1, gl.R8, size, size, size);
+    gl.texSubImage3D(gl.TEXTURE_3D, 0, 0, 0, 0, size, size, size, gl.RED, gl.UNSIGNED_BYTE, data);
+  }
+
+  bind(unit, target, tex, loc) {
+    const gl = this.gl;
+    gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(target, tex);
+    if (loc) gl.uniform1i(loc, unit);
+  }
+
+  buildSky(size) {
+    const gl = this.gl;
+    if (this.skyTex) gl.deleteTexture(this.skyTex);
+    const mips = Math.floor(Math.log2(size)) + 1;
+    this.skyTex = this.texture(gl.TEXTURE_CUBE_MAP, gl.LINEAR_MIPMAP_LINEAR, gl.CLAMP_TO_EDGE);
+    gl.texStorage2D(gl.TEXTURE_CUBE_MAP, mips, gl.RGBA16F, size, size);
+    const fbo = gl.createFramebuffer(), pr = this.prog.sky;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.useProgram(pr.p);
+    this.bind(0, gl.TEXTURE_2D, this.lutTex, pr.u.uLut);
+    this.bind(1, gl.TEXTURE_3D, this.noiseTex, pr.u.uNoise);
+    gl.viewport(0, 0, size, size);
+    gl.disable(gl.SCISSOR_TEST); gl.disable(gl.BLEND);
+    for (let face = 0; face < 6; face++) {
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_CUBE_MAP_POSITIVE_X + face, this.skyTex, 0);
+      gl.uniform4f(pr.u.uFace, face, size, 0.55 * 2 / size, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo);
+    gl.bindTexture(gl.TEXTURE_CUBE_MAP, this.skyTex);
+    gl.generateMipmap(gl.TEXTURE_CUBE_MAP);               // box-filtered chain: conserves star flux
+  }
+
+  resize(fullW, fullH, lowW, lowH) {
+    const gl = this.gl;
+    for (const o of this.owned) { if (o.tex) gl.deleteTexture(o.tex); if (o.fbo) gl.deleteFramebuffer(o.fbo); }
+    this.owned = [];
+    const target = (w, h) => {
+      const tex = this.texture(gl.TEXTURE_2D, gl.LINEAR, gl.CLAMP_TO_EDGE);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA16F, w, h);
+      const fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      const o = { tex, fbo, w, h }; this.owned.push(o); return o;
+    };
+    const cache = (w, h) => {
+      const fbo = gl.createFramebuffer(), tex = [];
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      for (let i = 0; i < 4; i++) {
+        const t = this.texture(gl.TEXTURE_2D, gl.NEAREST, gl.CLAMP_TO_EDGE);
+        gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA32UI, w, h);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, t, 0);
+        tex.push(t); this.owned.push({ tex: t });
+      }
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2, gl.COLOR_ATTACHMENT3]);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) throw new Error('ray-cache framebuffer is incomplete');
+      this.owned.push({ fbo });
+      return { fbo, tex, w, h };
+    };
+    this.fullW = fullW; this.fullH = fullH;
+    this.cache = { full: cache(fullW, fullH), low: cache(lowW, lowH) };
+    this.scene = target(fullW, fullH);
+    this.bloom = [];
+    for (let i = 1; i <= BLOOM_LEVELS; i++) this.bloom.push(target(Math.max(1, fullW >> i), Math.max(1, fullH >> i)));
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  render(frame) {
+    const gl = this.gl;
+    if (!this.cache || !this.skyTex) return;
+    gl.bindVertexArray(this.vao);
+    gl.disable(gl.BLEND);
+    const use = (pr) => { gl.useProgram(pr.p); if (pr.u.U) gl.uniform4fv(pr.u.U, frame.u); return pr; };
+
+    const t = frame.trace;
+    if (t) {                                              // geodesics → ray cache (one band)
+      const c = this.cache[t.cache];
+      use(this.prog.trace);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, c.fbo);
+      gl.viewport(0, 0, t.w, t.h);
+      gl.enable(gl.SCISSOR_TEST); gl.scissor(0, t.y0, t.w, t.y1 - t.y0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.disable(gl.SCISSOR_TEST);
+    }
+
+    {                                                     // ray cache → HDR scene
+      const c = this.cache[frame.shadeSrc], pr = use(this.prog.shade);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.scene.fbo);
+      gl.viewport(0, 0, frame.shadeW, frame.shadeH);
+      this.bind(0, gl.TEXTURE_2D, c.tex[0], pr.u.uC0); this.bind(1, gl.TEXTURE_2D, c.tex[1], pr.u.uC1);
+      this.bind(2, gl.TEXTURE_2D, c.tex[2], pr.u.uC2); this.bind(3, gl.TEXTURE_2D, c.tex[3], pr.u.uC3);
+      this.bind(4, gl.TEXTURE_2D, this.lutTex, pr.u.uLut);
+      this.bind(5, gl.TEXTURE_3D, this.noiseTex, pr.u.uNoise);
+      this.bind(6, gl.TEXTURE_CUBE_MAP, this.skyTex, pr.u.uSkyTex);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
+    const sx = frame.shadeW / this.fullW, sy = frame.shadeH / this.fullH, N = BLOOM_LEVELS;
+    {                                                     // bloom: down chain, then equal-energy up chain
+      const pr = use(this.prog.down);
+      for (let i = 0; i < N; i++) {
+        const dst = this.bloom[i], src = i === 0 ? this.scene : this.bloom[i - 1];
+        gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo); gl.viewport(0, 0, dst.w, dst.h);
+        this.bind(0, gl.TEXTURE_2D, src.tex, pr.u.uTexA);
+        gl.uniform2f(pr.u.uUVScale, i === 0 ? sx : 1, i === 0 ? sy : 1);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
+      const pu = use(this.prog.up);
+      gl.enable(gl.BLEND); gl.blendFunc(gl.CONSTANT_COLOR, gl.ONE_MINUS_CONSTANT_COLOR);
+      for (let i = N - 2; i >= 0; i--) {
+        const dst = this.bloom[i], k = (N - 1 - i) / (N - i);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo); gl.viewport(0, 0, dst.w, dst.h);
+        gl.blendColor(k, k, k, k);
+        this.bind(0, gl.TEXTURE_2D, this.bloom[i + 1].tex, pu.u.uTexA);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
+      gl.disable(gl.BLEND);
+    }
+
+    {                                                     // output transform → canvas
+      const pr = use(this.prog.composite);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+      this.bind(0, gl.TEXTURE_2D, this.scene.tex, pr.u.uTexA);
+      this.bind(1, gl.TEXTURE_2D, this.bloom[0].tex, pr.u.uTexB);
+      gl.uniform2f(pr.u.uUVScale, sx, sy);
+      gl.uniformMatrix3fv(pr.u.uOutMat, false, this.outMat);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   6. APPLICATION
+   ════════════════════════════════════════════════════════════════════════════ */
+(async function main() {
+  const $ = (id) => document.getElementById(id);
+  const canvas = $('view');
+  const query = new URLSearchParams(location.search);
+  const DEG = Math.PI / 180;
+  const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+
+  /* ── Constants ───────────────────────────────────────────────────────────── */
+  const DISK_OUTER = 20;          // disk outer edge [M]
+  const R_ESCAPE = 1000;          // rays beyond this radius sample the sky
+  const FOV_FAR = 0.30, FOV_NEAR = 0.80;   // tan(fovY/2): ≈ 33° far away, widening to ≈ 77° for close passes
+  const TIME_RATE = 7;            // simulation speed: M of coordinate time per second
+  const NOISE_PERIOD = 90;        // turbulence cross-fade period [M]
+  const NOISE_SIZE = 96, NOISE_CELLS = 16;
+  const MOTION_SCALE_MAX = 0.5, MOTION_SCALE_MIN = 0.22;
+
+  /** Quality presets: internal resolution (fraction of device pixels), integrator
+      budget, disk detail, number of jittered supersampling passes, sky cubemap size. */
+  const QUALITY = {
+    low:    { scale: 0.5,  steps: 220, stepQ: 1.5,  layers: 1, octaves: 3, gens: 4,  sky: 1024 },
+    medium: { scale: 0.7,  steps: 280, stepQ: 1.25, layers: 2, octaves: 4, gens: 8,  sky: 2048 },
+    high:   { scale: 0.85, steps: 340, stepQ: 1.0,  layers: 3, octaves: 4, gens: 12, sky: 2048 },
+    ultra:  { scale: 1.0,  steps: 400, stepQ: 1.0,  layers: 3, octaves: 5, gens: 16, sky: 2048 },
+  };
+
+  /* ── User-facing parameters ──────────────────────────────────────────────── */
+  const P = {
+    spin: 0.99,
+    tempK: 11500,
+    mode: 'cinematic',            // 'cinematic' (gravitational redshift only, weak beaming) | 'physical'
+    exposureEV: 0,
+    bloom: 0.07,
+    hdrPeak: 8,                   // × SDR white
+    quality: QUALITY[query.get('quality')] ? query.get('quality') : 'ultra',
+    paused: false,
+  };
+
+  /* ── Camera: orbit about the hole, always looking at it ──────────────────── */
+  // View 1 is the classic framing, 3.5° above the disk plane.  Fitting the whole r ≤ 20 M
+  // disk in frame takes a distant camera with a long lens (as for the disk figures of [J15]);
+  // from r ≈ 25 M the near rim of the disk would be only 5 M away and far wider than any frame.
+  const VIEWS = {
+    1: { inc: 86.5, dist: 60 },   // Interstellar
+    2: { inc: 0.5,  dist: 70 },   // face-on
+    3: { inc: 90,   dist: 60 },   // edge-on
+    4: { inc: 81,   dist: 11 },   // close flyby, skimming over the disk
+  };
+  const cam = { az: 0, inc: VIEWS[1].inc * DEG, dist: VIEWS[1].dist, distTarget: VIEWS[1].dist,
+                vAz: 0, vInc: 0, pendAz: 0, pendInc: 0, dragging: false, tween: null };
+
+  function cameraUpdate(dt) {
+    let changed = false;
+    if (cam.tween) {
+      const w = cam.tween;
+      w.t = Math.min(1, w.t + dt / w.dur);
+      const s = w.t * w.t * w.t * (w.t * (w.t * 6 - 15) + 10);
+      cam.az = w.az0 + (w.az1 - w.az0) * s;
+      cam.inc = w.inc0 + (w.inc1 - w.inc0) * s;
+      cam.dist = Math.exp(Math.log(w.d0) + (Math.log(w.d1) - Math.log(w.d0)) * s);
+      cam.distTarget = cam.dist;
+      if (w.t >= 1) cam.tween = null;
+      return true;
+    }
+    if (cam.pendAz !== 0 || cam.pendInc !== 0) {
+      cam.az += cam.pendAz; cam.inc += cam.pendInc;
+      if (dt > 0) {                                       // velocity estimate for inertia
+        cam.vAz += (cam.pendAz / dt - cam.vAz) * 0.5;
+        cam.vInc += (cam.pendInc / dt - cam.vInc) * 0.5;
+      }
+      cam.pendAz = cam.pendInc = 0;
+      changed = true;
+    } else if (cam.dragging) {
+      cam.vAz *= 0.6; cam.vInc *= 0.6;
+    } else if (Math.abs(cam.vAz) > 2e-3 || Math.abs(cam.vInc) > 2e-3) {
+      cam.az += cam.vAz * dt; cam.inc += cam.vInc * dt;
+      const decay = Math.exp(-dt * 4.2);
+      cam.vAz *= decay; cam.vInc *= decay;
+      changed = true;
+    } else { cam.vAz = cam.vInc = 0; }
+    const ld = Math.log(cam.distTarget / cam.dist);
+    if (Math.abs(ld) > 2e-4) { cam.dist *= Math.exp(ld * (1 - Math.exp(-dt * 9))); changed = true; }
+    else if (ld !== 0) { cam.dist = cam.distTarget; changed = true; }
+    const inc = clamp(cam.inc, 0.3 * DEG, 179.7 * DEG);
+    if (inc !== cam.inc) { cam.inc = inc; cam.vInc = 0; }
+    return changed;
+  }
+
+  function goToView(n) {
+    const v = VIEWS[n];
+    if (!v) return;
+    cam.tween = { t: 0, dur: 2.6, az0: cam.az, az1: cam.az, inc0: cam.inc, inc1: v.inc * DEG, d0: cam.dist, d1: v.dist };
+    cam.vAz = cam.vInc = 0;
+  }
+
+  /** Field of view: a long lens far away, opening to a wide angle as the camera closes in. */
+  function tanHalfFov() {
+    const t = clamp((cam.dist - 8) / 32, 0, 1);
+    return FOV_NEAR + (FOV_FAR - FOV_NEAR) * t * t * (3 - 2 * t);
+  }
+
+  /** Camera position and axes in Kerr–Schild Cartesian coordinates. */
+  function cameraFrame() {
+    const st = Math.sin(cam.inc), ct = Math.cos(cam.inc), sp = Math.sin(cam.az), cp = Math.cos(cam.az);
+    return {
+      pos: [cam.dist * st * cp, cam.dist * st * sp, cam.dist * ct],
+      fwd: [-st * cp, -st * sp, -ct],
+      right: [-sp, cp, 0],
+      up: [-ct * cp, -ct * sp, st],
+    };
+  }
+
+  /* ── Renderer: WebGPU, else WebGL2 ───────────────────────────────────────── */
+  let renderer = null;
+  const fatal = (msg) => {
+    const el = document.createElement('div'); el.id = 'fatal'; el.textContent = msg; document.body.appendChild(el);
+  };
+  const showNotice = (msg) => { const n = $('notice'); n.textContent = msg; n.hidden = false; };
+  let gpuError = null;
+  if (query.get('backend') !== 'webgl2') {
+    try { renderer = await WebGPURenderer.create(canvas); } catch (e) { gpuError = e; console.warn('WebGPU unavailable:', e); }
+  }
+  if (!renderer) {
+    try {
+      const fresh = canvas.cloneNode(false);              // a canvas that was asked for 'webgpu' cannot give 'webgl2'
+      canvas.replaceWith(fresh);
+      renderer = WebGL2Renderer.create(fresh);
+      showNotice((gpuError ? 'WebGPU unavailable: ' : 'Forced by URL: ') + 'WebGL2 fallback (SDR, simplified pipeline)');
+    } catch (e) {
+      console.error(e);
+      fatal('This renderer needs WebGPU (or WebGL2 with float render targets). ' + (gpuError ? gpuError.message : e.message));
+      return;
+    }
+  }
+  const view = renderer.canvas;
+  renderer.onError = (m) => showNotice(m.length > 140 ? m.slice(0, 140) + '…' : m);
+
+  /* ── HDR detection ───────────────────────────────────────────────────────── */
+  const hdrQuery = window.matchMedia('(dynamic-range: high)');
+  let hdrOn = false;
+  function applyHDR() {
+    hdrOn = renderer.setHDR(hdrQuery.matches && query.get('hdr') !== '0');
+    const pill = $('hdrPill');
+    pill.textContent = hdrOn ? 'HDR on' : 'HDR off';
+    pill.classList.toggle('on', hdrOn);
+    $('peak').disabled = !hdrOn;
+    S.wake = 4;
+  }
+  hdrQuery.addEventListener('change', applyHDR);
+
+  /* ── Tables and sky ──────────────────────────────────────────────────────── */
+  const bh = { a: P.spin, rh: 0, rin: 0, gain: 1 };
+  function updateSpin() {
+    bh.a = P.spin;
+    bh.rh = Kerr.horizon(bh.a);
+    bh.rin = Kerr.isco(bh.a);                             // disk inner edge = prograde ISCO [B72]
+    const lut = Tables.buildLUT(bh.a, bh.rin, DISK_OUTER);
+    bh.gain = lut.gain;
+    renderer.updateLUT(lut.data);
+  }
+  renderer.setNoise(Tables.buildNoise(NOISE_SIZE, NOISE_CELLS), NOISE_SIZE);
+  updateSpin();
+  let skySize = 0;
+  function ensureSky() {
+    const want = Math.min(Number(query.get('sky')) || QUALITY[P.quality].sky, renderer.maxTextureSize);
+    if (want !== skySize) { skySize = want; renderer.buildSky(want); }
+  }
+  ensureSky();
+
+  /* ── Geodesic-cache scheduling state ─────────────────────────────────────── */
+  // The geodesics depend only on the camera and the spin.  While either changes
+  // the whole frame is re-traced every frame at reduced ("motion") resolution.
+  // Once they are at rest the full-resolution cache is traced in bands over a
+  // few frames, and then re-traced with new sub-pixel jitters to supersample.
+  const S = {
+    W: 0, H: 0, lowMaxW: 0, lowMaxH: 0,     // internal resolution, motion-cache capacity
+    lowW: 0, lowH: 0, lowJit: [0, 0], lowValid: false,
+    gen: 0, band: 0, fullReady: false, refineDone: false,
+    histValid: false, dirty: true, wake: 0, idle: false, frame: 0, time: 0, prevDist: 1, autoScale: 1,
+    cssW: 0, cssH: 0, dpr: 0,
+  };
+  const perf = { refresh: 1 / 60, samples: [], fallback60: false, motionScale: 0.4, cooldown: 0, missStreak: 0,
+                 budget: 0, slowStill: 0, fps: 0, auto: query.get('auto') !== '0' };
+
+  function allocate() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const cw = Math.max(64, Math.min(renderer.maxTextureSize, Math.round(view.clientWidth * dpr)));
+    const ch = Math.max(64, Math.min(renderer.maxTextureSize, Math.round(view.clientHeight * dpr)));
+    view.width = cw; view.height = ch;
+    S.cssW = view.clientWidth; S.cssH = view.clientHeight; S.dpr = dpr;
+    let scale = QUALITY[P.quality].scale * S.autoScale;
+    const cap = renderer.maxCachePixels;                  // the ray cache must fit a single buffer
+    if (cw * ch * scale * scale > cap) scale = Math.sqrt(cap / (cw * ch)) * 0.999;
+    S.W = Math.max(32, Math.round(cw * scale)); S.H = Math.max(32, Math.round(ch * scale));
+    S.lowMaxW = Math.ceil(S.W * MOTION_SCALE_MAX); S.lowMaxH = Math.ceil(S.H * MOTION_SCALE_MAX);
+    renderer.resize(S.W, S.H, S.lowMaxW, S.lowMaxH);
+    S.lowValid = false; S.histValid = false; S.dirty = true; S.wake = 4;
+    perf.budget = S.W * S.H / 10;
+  }
+  applyHDR();
+  allocate();
+  new ResizeObserver(() => { S.cssW = -1; }).observe(view);
+
+  const halton = (i, b) => { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; };
+
+  /* ── Frame-rate governor ─────────────────────────────────────────────────── */
+  // Target = display refresh (120 Hz on ProMotion).  If even the smallest motion
+  // resolution cannot hold it, the target falls back to half the refresh rate.
+  function governor(dt, moving) {
+    if (dt <= 0 || dt > 0.25) return;
+    perf.fps += (1 / dt - perf.fps) * (perf.fps ? 0.08 : 1);
+    perf.samples.push(dt); if (perf.samples.length > 240) perf.samples.shift();
+    const sorted = perf.samples.slice().sort((x, y) => x - y);
+    perf.refresh = clamp(sorted[Math.floor(sorted.length * 0.05)], 1 / 240, 1 / 24);
+    if (!perf.auto) return;
+    const target = perf.refresh * (perf.fallback60 ? 2 : 1);
+    const miss = dt > target * 1.4;
+    if (moving) {
+      if (miss) {
+        perf.missStreak++;
+        if (perf.motionScale <= MOTION_SCALE_MIN && perf.missStreak > 24) perf.fallback60 = true;
+        perf.motionScale = Math.max(MOTION_SCALE_MIN, perf.motionScale * 0.86); perf.cooldown = 45;
+      } else {
+        perf.missStreak = Math.max(0, perf.missStreak - 1);
+        if (--perf.cooldown <= 0) perf.motionScale = Math.min(MOTION_SCALE_MAX, perf.motionScale * 1.012);
+      }
+    } else if (!S.refineDone) {
+      perf.budget = miss ? Math.max(S.W * 16, perf.budget * 0.75) : Math.min(S.W * S.H, perf.budget * 1.08);
+    } else {
+      // At rest with nothing left to trace: if shading alone cannot hold the frame
+      // rate, lower the internal resolution one notch.
+      perf.slowStill = miss ? perf.slowStill + 1 : Math.max(0, perf.slowStill - 2);
+      if (perf.slowStill > 60 && S.autoScale > 0.5) { S.autoScale = Math.max(0.5, S.autoScale * 0.85); perf.slowStill = 0; S.cssW = -1; }
+    }
+  }
+
+  /* ── Per-frame uniforms ──────────────────────────────────────────────────── */
+  const U = new Float32Array(UNIFORM_FLOATS);
+  const setU = (i, x, y = 0, z = 0, w = 0) => { U[i * 4] = x; U[i * 4 + 1] = y; U[i * 4 + 2] = z; U[i * 4 + 3] = w; };
+  let lastTetrad = null;
+
+  function frame(now) {
+    requestAnimationFrame(frame);
+    const dtRaw = (now - frame.last) / 1000 || 0;
+    frame.last = now;
+    const dt = clamp(dtRaw, 0, 0.1);
+    if (view.clientWidth !== S.cssW || view.clientHeight !== S.cssH || (window.devicePixelRatio || 1) !== S.dpr && S.dpr < 3) {
+      if (view.clientWidth > 0 && view.clientHeight > 0) allocate();
+    }
+
+    const moved = cameraUpdate(dt) || S.dirty;
+    S.dirty = false;
+    // Paused, fully refined and untouched: the image cannot change, so skip the frame entirely.
+    if (P.paused && S.refineDone && !moved && S.wake <= 0) {
+      if (!S.idle) { S.idle = true; updateReadout(); }
+      return;
+    }
+    S.idle = false;
+    S.wake--;
+    if (!P.paused) S.time += dt * TIME_RATE;
+    S.frame++;
+    governor(dtRaw, moved);
+
+    const Q = QUALITY[P.quality];
+    const W = S.W, H = S.H;
+    const cf = cameraFrame();
+    const tet = Kerr.cameraTetrad(bh.a, cf.pos, cf.right, cf.up, cf.fwd);
+    lastTetrad = tet;
+
+    /* cache scheduling */
+    let trace = null, jit = [0, 0], stepQ = Q.stepQ;
+    if (moved || !S.lowValid) {
+      S.gen = 0; S.band = 0; S.fullReady = false; S.refineDone = false; S.lowValid = true;
+      S.lowW = clamp(Math.round(W * perf.motionScale), 16, S.lowMaxW);
+      S.lowH = clamp(Math.round(H * perf.motionScale), 16, S.lowMaxH);
+      const k = (S.frame % 16) + 1;
+      S.lowJit = jit = [halton(k, 2) - 0.5, halton(k, 3) - 0.5];
+      stepQ = Math.max(Q.stepQ, 1.5);                     // coarser steps while moving
+      trace = { cache: 'low', w: S.lowW, h: S.lowH, y0: 0, y1: S.lowH, staticWeight: 0 };
+    } else if (!S.refineDone) {
+      if (S.gen === 0) { S.gen = 1; S.band = 0; }
+      const rows = clamp(Math.round(perf.budget / W), 8, H);
+      const y0 = S.band, y1 = Math.min(H, y0 + rows);
+      if (S.gen > 1) jit = [halton(S.gen, 2) - 0.5, halton(S.gen, 3) - 0.5];
+      trace = { cache: 'full', w: W, h: H, y0, y1, staticWeight: renderer.supportsSupersample ? 1 / S.gen : 0 };
+      S.band = y1;
+      if (y1 >= H) {
+        S.fullReady = true; S.gen++; S.band = 0;
+        if (S.gen > Q.gens || !renderer.supportsSupersample) S.refineDone = true;
+      }
+    }
+
+    /* uniforms */
+    const tanH = tanHalfFov();
+    setU(0, cf.pos[0], cf.pos[1], cf.pos[2], tanH);
+    setU(1, tet.e0[1], tet.e0[2], tet.e0[3], tet.e0[0]);
+    setU(2, tet.e1[1], tet.e1[2], tet.e1[3], tet.e1[0]);
+    setU(3, tet.e2[1], tet.e2[2], tet.e2[3], tet.e2[0]);
+    setU(4, tet.e3[1], tet.e3[2], tet.e3[3], tet.e3[0]);
+    setU(5, bh.a, bh.rh, bh.rin, DISK_OUTER);
+    if (trace) setU(6, trace.w, trace.h, trace.y0, trace.y1);
+    setU(7, jit[0], jit[1], Q.steps, W / H);
+    setU(8, stepQ, cam.dist, R_ESCAPE);
+    const useFull = S.fullReady;
+    const sw = useFull ? W : S.lowW, sh = useFull ? H : S.lowH;
+    setU(9, sw, sh, S.time, S.frame);
+    setU(10, useFull && renderer.supportsSupersample ? 1 : 0, Q.layers, Q.octaves, 1);
+    const physical = P.mode === 'physical';
+    setU(11, P.tempK, physical ? 1 : 0, physical ? 1 : 0.18, bh.gain);
+    setU(12, NOISE_PERIOD, 3.2, 0.035, 0.56);
+    setU(13, 1, 2 / skySize, Math.log2(skySize) - 1);
+    const base = 1.6;                                     // one exposure for both outputs; the tone curves differ
+    setU(14, base * Math.pow(2, P.exposureEV), P.bloom, hdrOn ? P.hdrPeak : 0, 0.012);
+    setU(15, 0.55, view.width, view.height);
+    const alpha = useFull || !S.histValid ? 1 : 0.34;
+    setU(16, alpha, moved ? cam.dist * tanH / S.prevDist : 1, useFull ? 0 : S.lowJit[0], useFull ? 0 : S.lowJit[1]);
+    setU(17, sw, sh, W, H);
+    setU(18, Tables.T_MIN, Tables.T_MAX, Tables.LUT_N);
+
+    renderer.render({ u: U, trace, shadeSrc: useFull ? 'full' : 'low', shadeW: sw, shadeH: sh });
+    S.histValid = true;
+    S.prevDist = cam.dist * tanH;                         // apparent size ∝ 1 / (distance · tan(fov/2))
+    if ((S.frame & 7) === 0) updateReadout();
+  }
+
+  /* ── UI ──────────────────────────────────────────────────────────────────── */
+  const markDirty = () => { S.dirty = true; };
+  const ui = {
+    spin: [$('spin'), $('spinOut'), () => P.spin, (v) => { P.spin = v; updateSpin(); markDirty(); }, (v) => v.toFixed(3)],
+    inc: [$('inc'), $('incOut'), () => cam.inc / DEG, (v) => { cam.inc = v * DEG; cam.tween = null; cam.vInc = 0; markDirty(); }, (v) => v.toFixed(1) + '°'],
+    temp: [$('temp'), $('tempOut'), () => P.tempK, (v) => { P.tempK = v; markDirty(); }, (v) => Math.round(v).toLocaleString('en-US') + ' K'],
+    exposure: [$('exposure'), $('exposureOut'), () => P.exposureEV, (v) => { P.exposureEV = v; S.wake = 4; }, (v) => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(2) + ' EV'],
+    bloom: [$('bloom'), $('bloomOut'), () => P.bloom, (v) => { P.bloom = v; S.wake = 4; }, (v) => (v * 100).toFixed(1) + ' %'],
+    peak: [$('peak'), $('peakOut'), () => P.hdrPeak, (v) => { P.hdrPeak = v; S.wake = 4; }, (v) => v.toFixed(1) + '× white'],
+  };
+  for (const [input, out, get, set, fmt] of Object.values(ui)) {
+    input.value = get(); out.textContent = fmt(get());
+    input.addEventListener('input', () => { const v = parseFloat(input.value); set(v); out.textContent = fmt(v); });
+  }
+  function syncMode() {
+    for (const b of $('mode').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.mode === P.mode));
+  }
+  function setMode(m) { P.mode = m; syncMode(); markDirty(); }
+  $('mode').addEventListener('click', (e) => { const m = e.target.dataset && e.target.dataset.mode; if (m) setMode(m); });
+  syncMode();
+  $('quality').value = P.quality;
+  $('quality').addEventListener('change', (e) => { P.quality = e.target.value; S.autoScale = 1; ensureSky(); allocate(); });
+
+  function updateReadout() {
+    $('roFps').textContent = perf.fps.toFixed(0) + ' fps';
+    $('roRes').textContent = `${S.W} × ${S.H}` + (S.fullReady ? '' : ` (tracing ${S.lowW} × ${S.lowH})`);
+    $('roState').textContent = !S.fullReady ? 're-tracing' : S.refineDone ? 'cached' + (renderer.supportsSupersample ? ` · ${QUALITY[P.quality].gens}× AA` : '') : `cached · refining ${S.gen - 1}/${QUALITY[P.quality].gens}`;
+    $('roBackend').textContent = renderer.label + (hdrOn ? ' · HDR' : ' · SDR');
+    if (!cam.dragging && document.activeElement !== ui.inc[0]) {
+      ui.inc[0].value = cam.inc / DEG; ui.inc[1].textContent = ui.inc[4](cam.inc / DEG);
+    }
+    if (!$('debug').hidden) updateLive();
+  }
+
+  /* pointer: drag to orbit (with inertia), wheel to dolly */
+  let px = 0, py = 0;
+  view.addEventListener('pointerdown', (e) => {
+    cam.dragging = true; cam.tween = null; cam.vAz = cam.vInc = 0; px = e.clientX; py = e.clientY;
+    view.setPointerCapture(e.pointerId); view.classList.add('dragging');
+  });
+  view.addEventListener('pointermove', (e) => {
+    if (!cam.dragging) return;
+    cam.pendAz -= (e.clientX - px) * 0.0045; cam.pendInc -= (e.clientY - py) * 0.0045;
+    px = e.clientX; py = e.clientY;
+  });
+  const endDrag = () => { cam.dragging = false; view.classList.remove('dragging'); };
+  view.addEventListener('pointerup', endDrag);
+  view.addEventListener('pointercancel', endDrag);
+  view.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    cam.tween = null;
+    cam.distTarget = clamp(cam.distTarget * Math.exp(e.deltaY * (e.deltaMode === 1 ? 0.04 : 0.0012)), 6, 100);
+  }, { passive: false });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey || e.target.tagName === 'SELECT') return;
+    const k = e.key.toLowerCase();
+    if (k === 'h') $('panel').hidden = !$('panel').hidden;
+    else if (k === 'd') { $('debug').hidden = !$('debug').hidden; if (!$('debug').hidden) { runSelfCheck(); updateLive(); } }
+    else if (k === 'm') setMode(P.mode === 'physical' ? 'cinematic' : 'physical');
+    else if (k === ' ') { P.paused = !P.paused; S.wake = 4; e.preventDefault(); }
+    else if (VIEWS[k]) goToView(k);
+    else return;
+    $('hint').classList.add('faded');
+  });
+  setTimeout(() => $('hint').classList.add('faded'), 9000);
+
+  /* ── Accuracy self-check (key D) ─────────────────────────────────────────── */
+  // Every "measured" value marked ∫ comes from the same RK4 Kerr–Schild integrator
+  // (CPU mirror of the compute shader) launched through the same camera tetrad.
+  function testCamera(a, R) {
+    return Kerr.cameraTetrad(a, [R, 0, 0], [0, 1, 0], [0, 0, 1], [-1, 0, 0]);   // on the equator, looking at the hole
+  }
+  /** Bisect the shadow rim along a horizontal screen line at height `beta` (units of M).
+      Returns { alpha (screen coordinate × R), b = L_z/E of the marginal ray, rmin }. */
+  function shadowRim(a, side, beta, R = 1000) {
+    const tet = testCamera(a, R), pos = [R, 0, 0];
+    const shoot = (alpha) => {
+      const n = [alpha / R, beta / R, 1], l = Math.hypot(n[0], n[1], n[2]);
+      const q = Kerr.photonMomentum(tet, n.map((c) => c / l));
+      return { q, t: Kerr.trace(a, pos, q, { quality: 0.5, maxSteps: 30000 }) };
+    };
+    let inside = 0, outside = 14 * side, last = null;
+    if (shoot(0).t.fate !== 'horizon') inside = 2.5;               // the shadow shifts toward +α with spin
+    for (let i = 0; i < 34; i++) {
+      const mid = 0.5 * (inside + outside), s = shoot(mid);
+      if (s.t.fate === 'horizon') inside = mid; else { outside = mid; last = s; }
+    }
+    const q = last.q;
+    return { alpha: 0.5 * (inside + outside), b: -(pos[0] * q[2] - pos[1] * q[1]) / q[0], rmin: last.t.rmin };
+  }
+
+  let checksDone = false;
+  function runSelfCheck() {
+    if (checksDone) return;
+    checksDone = true;
+    setTimeout(() => {
+      const rows = [];
+      const add = (name, expected, got, tol, digits = 3) => rows.push({ name, expected: expected.toFixed(digits), got: got.toFixed(digits), pass: Math.abs(got - expected) <= tol });
+      const flag = (name, expected, got, pass) => rows.push({ name, expected, got, pass });
+
+      // a = 0 (Schwarzschild)
+      const s0L = shadowRim(0, -1, 0), s0R = shadowRim(0, +1, 0);
+      add('Shadow radius, a = 0  ∫', 3 * Math.sqrt(3), 0.5 * (Math.abs(s0L.b) + Math.abs(s0R.b)), 5e-3);
+      add('Photon sphere, a = 0  ∫ (periapsis of marginal ray)', 3, 0.5 * (s0L.rmin + s0R.rmin), 2e-2);
+      add('Photon sphere, a = 0  (B72 formula)', 3, Kerr.photonOrbit(0), 1e-9);
+      add('ISCO, a = 0  (B72 formula)', 6, Kerr.isco(0), 1e-9);
+      // circular-orbit energy E(r) is stationary exactly at the ISCO
+      const E = (r, a) => (1 - 2 / r + a * Math.pow(r, -1.5)) / Math.sqrt(1 - 3 / r + 2 * a * Math.pow(r, -1.5));
+      const dE = (r, a) => (E(r + 1e-4, a) - E(r - 1e-4, a)) / 2e-4;
+      add('dE/dr at r = 6, a = 0  (marginal stability)', 0, dE(6, 0), 1e-6, 7);
+
+      // a = 0.998
+      const A = 0.998;
+      add('Prograde ISCO, a = 0.998', 1.237, Kerr.isco(A), 1e-3);
+      add('dE/dr at the ISCO, a = 0.998', 0, dE(Kerr.isco(A), A), 1e-5, 7);
+      const kL = shadowRim(A, -1, 0), kR = shadowRim(A, +1, 0);
+      add('Prograde rim b = L/E, a = 0.998  ∫', Kerr.criticalImpact(A, +1), kL.b, 2e-2);
+      add('Retrograde rim b = L/E, a = 0.998  ∫', Kerr.criticalImpact(A, -1), kR.b, 2e-2);
+
+      // D-shape: horizontal offset of the shadow and flattening of the prograde side
+      const sag = (a) => {
+        const l0 = shadowRim(a, -1, 0).alpha, r0 = shadowRim(a, +1, 0).alpha;
+        const l1 = shadowRim(a, -1, 2.6).alpha, r1 = shadowRim(a, +1, 2.6).alpha;
+        return { offset: 0.5 * (l0 + r0), pro: Math.abs(l1 - l0), retro: Math.abs(r0 - r1) };
+      };
+      const g0 = sag(0), g5 = sag(0.5), g9 = sag(0.9), gA = sag(A);
+      flag('Shadow centre offset: a = 0, 0.5, 0.9, 0.998  ∫', '0, then growing',
+        [g0, g5, g9, gA].map((g) => g.offset.toFixed(2)).join(', '),
+        Math.abs(g0.offset) < 0.02 && g5.offset > 0.5 && g9.offset > g5.offset && gA.offset > g9.offset);
+      flag('Rim sagitta at β = 2.6 M, a = 0 (circle)  ∫', '0.697 both sides', `${g0.pro.toFixed(3)} / ${g0.retro.toFixed(3)}`,
+        Math.abs(g0.pro - 0.697) < 0.01 && Math.abs(g0.retro - 0.697) < 0.01);
+      flag('D-shape, a = 0.998: prograde side flattened  ∫', 'pro ≪ retro', `${gA.pro.toFixed(3)} / ${gA.retro.toFixed(3)}`, gA.pro < 0.5 * gA.retro);
+
+      // integrator invariants on a strongly lensed ray at the current spin
+      {
+        const a = bh.a, tet = testCamera(a, 60), n = [0.11, 0.04, 1], l = Math.hypot(...n);
+        const q = Kerr.photonMomentum(tet, n.map((c) => c / l));
+        const t = Kerr.trace(a, [60, 0, 0], q, { quality: 1, maxSteps: 4000 });
+        const s = t.state, Lz0 = 60 * q[2], Lz1 = s[0] * s[4] - s[1] * s[3];
+        const g = Kerr.ksMetric(a, s[0], s[1], s[2]);
+        // H = ½ g^μν q_μ q_ν via g^μν = η^μν − f l^μ l^ν
+        const r = Kerr.ksRadius(a, s[0], s[1], s[2]), Pp = r * r + a * a, f = 2 * r * r * r / (r * r * r * r + a * a * s[2] * s[2]);
+        const lq = q[0] + ((r * s[0] - a * s[1]) / Pp) * s[3] + ((r * s[1] + a * s[0]) / Pp) * s[4] + (s[2] / r) * s[5];
+        const Hn = 0.5 * (-q[0] * q[0] + s[3] * s[3] + s[4] * s[4] + s[5] * s[5]) - 0.5 * f * lq * lq;
+        flag(`Null condition |H| after ${t.steps} steps, a = ${a.toFixed(3)}  ∫`, '< 1e-5', Math.abs(Hn).toExponential(1), Math.abs(Hn) < 1e-5 && g.length === 16);
+        flag('L_z drift along the same ray  ∫', '< 1e-5', Math.abs(Lz1 - Lz0).toExponential(1), Math.abs(Lz1 - Lz0) < 1e-5);
+      }
+
+      $('checks').innerHTML = rows.map((r) =>
+        `<tr><td>${r.name}</td><td>${r.expected}</td><td>${r.got}</td><td class="${r.pass ? 'pass' : 'fail'}">${r.pass ? 'PASS' : 'FAIL'}</td></tr>`).join('');
+    }, 30);
+  }
+
+  /** Live quantities + analytic shadow rim [Bardeen 1973; B72]:
+      spherical photon orbits of radius r have  ξ = −(r³ − 3r² + a²r + a²)/(a(r − 1)),
+      η = r³(4a² − r(r − 3)²)/(a²(r − 1)²);  on the sky  α = −ξ/sin i,  β² = η + a²cos²i − ξ²cot²i. */
+  function updateLive() {
+    const a = bh.a, i = cam.inc;
+    const kv = [
+      ['spin a', a.toFixed(3)], ['horizon r₊', bh.rh.toFixed(4)], ['ISCO (disk inner edge)', bh.rin.toFixed(4)],
+      ['photon orbits (pro / retro)', `${Kerr.photonOrbit(a, 1).toFixed(3)} / ${Kerr.photonOrbit(a, -1).toFixed(3)}`],
+      ['camera r, θ', `${cam.dist.toFixed(1)} M, ${(i / DEG).toFixed(1)}°`],
+      ['ZAMO ω at camera', lastTetrad ? lastTetrad.omegaZamo.toExponential(2) : '–'],
+      ['steps per ray (cap)', String(QUALITY[P.quality].steps)],
+      ['internal / canvas', `${S.W}×${S.H} / ${view.width}×${view.height}`],
+      ['display refresh', (1 / perf.refresh).toFixed(0) + ' Hz' + (perf.fallback60 ? ' (targeting half)' : '')],
+    ];
+    $('liveKV').innerHTML = kv.map(([k, v]) => `<span>${k}</span><b>${v}</b>`).join('');
+    const pts = [];
+    if (a < 1e-3) {
+      for (let k = 0; k <= 72; k++) pts.push([5.19615 * Math.cos(k * Math.PI / 36), 5.19615 * Math.sin(k * Math.PI / 36)]);
+    } else {
+      const r1 = Kerr.photonOrbit(a, 1), r2 = Kerr.photonOrbit(a, -1), si = Math.max(Math.sin(i), 1e-3), ci = Math.cos(i), top = [];
+      for (let k = 0; k <= 200; k++) {
+        const r = r1 + (r2 - r1) * (0.5 - 0.5 * Math.cos(Math.PI * k / 200));
+        const xi = -(r * r * r - 3 * r * r + a * a * r + a * a) / (a * (r - 1));
+        const eta = r * r * r * (4 * a * a - r * (r - 3) * (r - 3)) / (a * a * (r - 1) * (r - 1));
+        const b2 = eta + a * a * ci * ci - xi * xi * ci * ci / (si * si);
+        if (b2 >= 0) top.push([-xi / si, Math.sqrt(b2)]);
+      }
+      for (const p of top) pts.push(p);
+      for (let k = top.length - 1; k >= 0; k--) pts.push([top[k][0], -top[k][1]]);
+    }
+    const path = pts.map((p, k) => `${k ? 'L' : 'M'}${p[0].toFixed(3)} ${(-p[1]).toFixed(3)}`).join('') + 'Z';
+    $('shadowPlot').innerHTML =
+      `<path d="M-9 0H9M0 -9V9" stroke="rgba(255,255,255,0.14)" stroke-width="0.06"/>` +
+      `<circle r="5.19615" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="0.06" stroke-dasharray="0.3 0.3"/>` +
+      `<path d="${path}" fill="rgba(0,0,0,0.85)" stroke="#ffb86b" stroke-width="0.12"/>`;
+  }
+
+  // Handle for the console / automated tests.
+  window.gargantua = { params: P, camera: cam, state: S, perf, renderer, markDirty, goToView, runSelfCheck, shadowRim };
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
